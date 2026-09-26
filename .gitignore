@@ -1,0 +1,32 @@
+# 行情快取、批次報告、測試輸出：含真實行情或個人使用痕跡，不要公開
+.twboard-cache/
+reports/
+out/
+qa-*/
+_to_delete/
+backup-*/
+備份_*/
+market_debug.log
+
+# 個人設定與紀錄
+watchlists.json
+filter_presets.json
+themes.json
+themes.json.bak
+alerts.json
+portfolio.json
+test_local.json
+*.tmp
+
+# 發行用壓縮檔（放在 GitHub Releases，不進版控）
+*.zip
+
+# Python / Node
+__pycache__/
+*.pyc
+node_modules/
+package-lock.json
+
+# 系統檔
+Thumbs.db
+.DS_Store

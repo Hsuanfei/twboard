@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: GPL-3.0-only
+     Copyright (C) 2026 黃炫斐 (Mick Huang)
+     本檔案是「台股戰略產生器」的一部分：自由軟體，依 GNU GPL 第 3 版釋出，不附任何擔保，詳見 LICENSE。
+     匯出的報告另有額外許可，見 LICENSE-EXCEPTION.md。 -->
+<html lang="zh-Hant" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+/*__CSS__*/
+</style>
+<!--__ECHARTS__-->
+</head>
+<body>
+<div class="wrap">
+<header class="export-brand"><strong>__APP_TITLE__</strong><span>__APP_CREDIT__</span><button type="button" class="gl-open" id="gl-open" data-glossary-open="" aria-haspopup="dialog" aria-label="指標名詞解釋" title="指標名詞解釋：每個指標是什麼、怎麼算、怎麼看"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9.4 9.3a2.7 2.7 0 1 1 3.9 2.4c-.8.4-1.3 1-1.3 1.9v.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="17.1" r="1.15" fill="currentColor"/></svg><span class="gl-label">指標名詞解釋</span></button></header>
+  <section class="macro" id="macro" aria-labelledby="macro-title" hidden>
+    <div class="macro-head">
+      <h2 id="macro-title">全球市場與匯率</h2>
+      <span class="macro-meta" id="macro-meta"></span>
+      
+    </div>
+    <div class="macro-tiles" id="macro-tiles"></div>
+    <div class="macro-charts">
+      <div class="macro-chart"><div class="mc-title">大盤走勢（起點＝100，各市場依自己的交易日）</div><div class="chart" id="macro-idx"></div></div>
+      <div class="macro-chart"><div class="mc-title">美元兌台幣（台銀即期中價）</div><div class="chart" id="macro-fx"></div></div>
+    </div>
+    <p class="macro-note">指數用價格指數、未含息；台、美、日假日不同，各線各畫各的，不對齊也不補值。這是背景資訊，沒有加入任何評分。</p>
+  </section>
+
+<!--__BODY__-->
+<!--__LEGAL__-->
+</div>
+<script>
+/*__BOARDJS__*/
+</script>
+<script>
+(function(){
+  var payload = /*__PAYLOAD__*/null;
+  function go(){ if(payload){ TWBoard.render(payload); if(payload.macro) TWBoard.renderMacro(payload.macro); } }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',go); else go();
+})();
+</script>
+</body>
+</html>

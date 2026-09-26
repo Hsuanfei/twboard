@@ -1,0 +1,224 @@
+<!-- SPDX-License-Identifier: GPL-3.0-only
+     Copyright (C) 2026 黃炫斐 (Mick Huang)
+     本檔案是「台股戰略產生器」的一部分：自由軟體，依 GNU GPL 第 3 版釋出，不附任何擔保，詳見 LICENSE。
+     匯出的報告另有額外許可，見 LICENSE-EXCEPTION.md。 -->
+
+  <!-- ===================== 頁首 ===================== -->
+  <header class="top">
+    <div class="top-row">
+      <div class="scan-flags" aria-label="分析狀態">
+        <span><i>◎</i><b>技術掃描<small>TECH SCAN</small></b></span>
+        <span><i>▥</i><b>法人追蹤<small>CHIP FLOW</small></b></span>
+        <span><i>◈</i><b id="h-quality">資料檢查<small>DATA STATUS</small></b></span>
+      </div>
+      <div class="ident"><span class="code" id="h-code"></span><span class="nm" id="h-name"></span></div>
+      <div class="kpi"><span class="lb">今日收盤價</span><span class="vl" id="h-close"></span></div>
+      <div class="kpi"><span class="lb">今日漲跌</span><span class="vl" id="h-chg"></span></div>
+      <div class="kpi"><span class="lb">今日漲幅</span><span class="vl" id="h-chgp"></span></div>
+      <div class="kpi"><span class="lb">成交量（張）</span><span class="vl" id="h-vol"></span></div>
+      <div class="kpi"><span class="lb">成交筆數</span><span class="vl" id="h-trades"></span></div>
+      <div class="kpi"><span class="lb">開盤</span><span class="vl" id="h-open"></span></div>
+      <div class="kpi"><span class="lb">最高</span><span class="vl" id="h-high"></span></div>
+      <div class="kpi"><span class="lb">最低</span><span class="vl" id="h-low"></span></div>
+      <div class="kpi"><span class="lb">最新交易日</span><span class="vl date-value" id="h-date"></span></div>
+      <div class="kpi"><span class="lb">資料筆數</span><span class="vl" id="h-days"></span></div>
+    </div>
+    <div class="meta" id="h-meta"></div>
+  </header>
+  <div class="board-toolbar">
+    <span class="board-caption">戰略分析工作台 <span>公開資料 · 規則分析</span></span>
+    <div class="ctrls">
+      <label class="font-choice">字體 <select id="font-size" aria-label="字體大小"><option value="1">標準</option><option value="1.15">大</option><option value="1.3">特大</option></select></label>
+      <button class="btn" id="btn-main-png" type="button">↓ 主K線 PNG</button>
+      <button class="btn live-only" id="dl-csv" data-download="csv" type="button">↓ 資料 CSV</button>
+      <button class="btn live-only" id="dl-html" data-download="export" type="button">↓ 戰略報告 HTML</button>
+      <button class="btn live-only" id="btn-paper" type="button" title="以最新收盤價記錄一筆模擬買進">＋ 模擬買進</button>
+      <button class="btn live-only" id="btn-alert" type="button" title="設定這檔的上下限價提醒">設定到價警示</button>
+      <button class="btn" id="btn-cb" aria-pressed="false" title="切換為橘／藍配色">色盲友善配色</button>
+      <button class="btn" id="btn-tab" aria-pressed="false">資料表</button>
+      <button class="btn" type="button" onclick="window.print()">列印 / PDF</button>
+    </div>
+  </div>
+  <p class="zoom-hint">點擊圖卡可放大，再點一次縮回；也可使用圖卡右上角的 ⤢ 按鈕。</p>
+  <div id="chart-export-status" class="chart-export-status" role="status"></div>
+
+  <!-- ===================== 18 格 ===================== -->
+  <div class="grid" id="analysis-grid" data-view="all">
+
+    <section class="card c1">
+      <h3><span class="no">01</span>主K線圖<span class="sub" id="t1sub"></span><button class="chart-save" type="button" data-chart-png="k1" aria-label="下載第 1 張圖表 PNG" title="下載圖表 PNG">↓</button></h3>
+      <div class="bb-tools"><button class="btn" id="btn-bb" type="button" aria-pressed="true">布林通道 20 / 2σ：開</button><button class="btn" id="btn-fib" type="button" aria-pressed="true">費波南希回撤：開</button><span>價格未還原 · 碰軌不代表買賣訊號</span></div>
+      <div class="chart" id="k1"></div>
+      <div class="bb-info" id="bb-info"></div>
+      <div class="bb-info fib-info" id="fib-info"></div>
+      <div class="note" id="n1" style="display:none"></div>
+    </section>
+
+    <section class="card c2">
+      <h3><span class="no">02</span>決策核心<span class="sub">DECISION CORE</span></h3>
+      <div class="decision-alert" id="decision-alert"></div>
+      <table class="kv" id="t2"></table>
+    </section>
+
+    <section class="card c3">
+      <h3><span class="no">03</span>多維度判讀<span class="sub">規則計分</span><button class="chart-save" type="button" data-chart-png="k3" aria-label="下載第 3 張圖表 PNG" title="下載圖表 PNG">↓</button></h3>
+      <div class="chart" id="k3"></div>
+      <div class="note" id="n3"></div>
+    </section>
+
+    <section class="card c4">
+      <h3><span class="no">04</span>收盤價分桶熱區<span class="sub">成交量估計</span><button class="chart-save" type="button" data-chart-png="k4" aria-label="下載第 4 張圖表 PNG" title="下載圖表 PNG">↓</button></h3>
+      <div class="chart" id="k4"></div>
+      <div class="note">依每日收盤價歸入全日成交量；非各價位實際成交量或持股成本。</div>
+    </section>
+
+    <section class="card c5">
+      <h3><span class="no">05</span>技術風險雷達<button class="chart-save" type="button" data-chart-png="k5" aria-label="下載第 5 張圖表 PNG" title="下載圖表 PNG">↓</button></h3>
+      <div class="chart" id="k5"></div>
+      <div class="note" id="n5"></div>
+    </section>
+
+    <section class="card c6">
+      <h3><span class="no">06</span>KD 指標（9,3,3）<span class="sub" id="t6sub"></span><button class="chart-save" type="button" data-chart-png="k6" aria-label="下載第 6 張圖表 PNG" title="下載圖表 PNG">↓</button></h3>
+      <div class="chart" id="k6"></div>
+    </section>
+
+    <section class="card c7">
+      <h3><span class="no">07</span>MACD 動能<span class="sub" id="t7sub"></span><button class="chart-save" type="button" data-chart-png="k7" aria-label="下載第 7 張圖表 PNG" title="下載圖表 PNG">↓</button></h3>
+      <div class="chart" id="k7"></div>
+    </section>
+
+    <section class="card c8">
+      <h3><span class="no">08</span>三大法人買賣超<span class="sub" id="t8sub"></span><button class="chart-save" type="button" data-chart-png="k8" aria-label="下載第 8 張圖表 PNG" title="下載圖表 PNG">↓</button></h3>
+      <div id="w8" style="display:flex;gap:12px;flex:1;min-height:0;">
+        <div style="flex:1 1 60%;min-width:0;display:flex;flex-direction:column;">
+          <div class="legend" id="lg8"></div>
+          <div class="chart" id="k8"></div>
+        </div>
+        <div style="flex:1 1 40%;min-width:0;overflow:auto;" id="tb8"></div>
+      </div>
+    </section>
+
+    <section class="card c9">
+      <h3><span class="no">09</span>風險監測</h3>
+      <div class="barlist" id="b9"></div>
+      <div class="note" id="n9"></div>
+    </section>
+
+    <section class="card c10">
+      <h3><span class="no">10</span>多空能量</h3>
+      <div class="barlist" id="b10"></div>
+      <div class="note" id="n10"></div>
+    </section>
+
+    <section class="card c11">
+      <h3><span class="no">11</span>技術狀態綜合儀表</h3>
+      <div class="chart" id="k11"></div>
+    </section>
+
+    <section class="card c12">
+      <h3><span class="no">12</span>動能燈號</h3>
+      <div class="lamps" id="l12"></div>
+      <div class="note" id="n12"></div>
+    </section>
+
+    <section class="card c13">
+      <h3><span class="no">13</span>收盤價分桶量分布<button class="chart-save" type="button" data-chart-png="k13" aria-label="下載第 13 張圖表 PNG" title="下載圖表 PNG">↓</button></h3>
+      <div class="chart" id="k13"></div>
+      <div class="note">依收盤價歸入全日成交量的估計；非實際成交價量分布。</div>
+    </section>
+
+    <section class="card c14">
+      <h3><span class="no">14</span>資料可用度</h3>
+      <div class="barlist" id="b14"></div>
+      <div class="note" id="n14"></div>
+    </section>
+
+    <section class="card c15">
+      <h3><span class="no">15</span>籌碼異動摘要<span class="sub" id="t15sub"></span><button class="chart-save" type="button" data-chart-png="k15" aria-label="下載第 15 張圖表 PNG" title="下載圖表 PNG">↓</button></h3>
+      <div id="w15" style="flex:1;display:flex;flex-direction:column;min-height:0;">
+        <table class="kv" id="t15"></table>
+        <div class="chart" id="k15" style="height:52px;flex:none;"></div>
+      </div>
+    </section>
+
+    <section class="card c16">
+      <h3><span class="no">16</span>融資融券<span class="sub" id="t16sub"></span></h3>
+      <div id="w16" style="flex:1;display:flex;"></div>
+    </section>
+
+    <section class="card c17">
+      <h3><span class="no">17</span>評分總覽<span class="sub">0–100 規則分</span></h3>
+      <div class="chart" id="k17"></div>
+    </section>
+
+    <section class="card c18">
+      <h3><span class="no">18</span>戰略綜合研判<span class="sub">規則輸出，非投資建議</span></h3>
+      <div class="verdict">
+        <div class="vmain">
+          <div class="vtag">技術與籌碼 · 綜合結論</div>
+          <div class="vtxt" id="v-txt"></div>
+          <div class="vbadges" id="v-badges"></div>
+        </div>
+        <div class="vside"><table class="kv" id="v-tab"></table></div>
+      </div>
+    </section>
+
+  </div>
+
+  <section class="dmi-panel" id="dmi-panel">
+    <h3>ADX／DMI 趨勢強度 <button class="chart-save" type="button" data-chart-png="dmi-chart" aria-label="下載 ADX 圖表 PNG">↓</button></h3>
+    <p id="dmi-summary" class="note"></p>
+    <div class="chart" id="dmi-chart"></div>
+    <p class="note">Wilder 14 日；ADX &lt;20 偏弱、20～25 過渡、≥25 趨勢較強。＋DI／−DI 分別看方向；強趨勢可能向下。只作顯示與篩選，不納入綜合分。</p>
+  </section>
+
+  <nav class="analysis-tabs" aria-label="分析檢視">
+    <button type="button" data-view="all" aria-pressed="true">▦ 綜合分析報告</button>
+    <button type="button" data-view="risk" aria-pressed="false">△ 風險監測報告</button>
+    <button type="button" data-view="kd" aria-pressed="false">▧ K線 + KD 圖表</button>
+    <button type="button" data-view="macd" aria-pressed="false">▧ K線 + MACD 圖表</button>
+    <button type="button" data-view="raw" aria-pressed="false">▤ 原始資料表</button>
+    <button type="button" data-view="bt" aria-pressed="false">◔ 規則分回測</button>
+  </nav>
+  <!-- ===================== 規則分回測 ===================== -->
+  <div class="tablewrap" id="btwrap" hidden>
+    <h3>規則分回測：高分之後，股價真的比較會漲嗎？</h3>
+    <section class="strategy-panel" aria-label="交易模擬">
+      <h3>交易模擬 · 次日進場／不重複持倉</h3>
+      <form id="strategy-form" class="strategy-form">
+        <label>進場條件<select id="st-signal"><option value="score">綜合分達門檻</option><option value="bb">布林首次突破上軌</option><option value="both">評分＋布林突破同時成立</option></select></label>
+        <label>綜合分門檻<input id="st-threshold" type="number" min="0" max="100" step="0.1" required></label>
+        <label>持有交易日<input id="st-hold" type="number" min="1" max="60" step="1" required></label>
+        <label>單邊手續費 %<input id="st-fee" type="number" min="0" max="5" step="0.0001" required></label>
+        <label>賣出交易稅 %<input id="st-tax" type="number" min="0" max="5" step="0.0001" required></label>
+        <label>單邊滑價 %<input id="st-slip" type="number" min="0" max="5" step="0.0001" required></label>
+        <label>起日（訊號日）<input id="st-start" type="date"></label>
+        <label>迄日<input id="st-end" type="date"></label>
+        <label>區間檢查<select id="st-segment"><option value="all">全部區間</option><option value="early">前70%區間</option><option value="late">後30%區間</option></select></label>
+        <label class="st-check"><input id="st-chip" type="checkbox">訊號日法人近20日完整</label>
+        <button class="btn" type="submit">套用回測</button><button class="btn" id="st-reset" type="button">恢復預設</button>
+        <button class="btn" id="st-csv" type="button">下載回測 CSV</button>
+      </form>
+      <p class="bt-note">成本預設為手續費0.1425%、賣出稅0.3%、滑價0.05%的模擬假設；ETF及其他商品請自行調整。計算採資金指數100，不含最低手續費、股數取整與漲跌停成交限制。</p>
+      <p id="strategy-status" class="strategy-status" role="status"></p>
+      <div id="strategy-result" aria-live="polite"></div>
+      <div id="strategy-chart" class="strategy-chart" role="img" aria-label="每日清算淨值指數"></div>
+      <div id="strategy-trades" class="scroll"></div>
+      <p class="bt-note">收盤訊號成立後，次一交易日開盤買進；持有第N個交易日收盤賣出。持倉期間忽略其他訊號，賣出當日收盤可產生下一日訊號。未到預定出場日仍保留未平倉，期末按收盤扣預估賣出成本估值。最大回落由每日清算淨值計算，並非盤中最大虧損。</p>
+      <p class="bt-note">區間切分後各自從空手開始，不帶入前段部位。後30%是時間分段檢查；反覆調參仍可能過度配適，不能視為獨立驗證。資料是目前取得的歷史版本，尚未模擬歷史公告時間或修訂。</p>
+    </section>
+    <details class="score-history" open><summary>原有分數與未來漲跌統計（未扣成本、樣本重疊）</summary><div id="btwrap-body"></div></details>
+  </div>
+  <!-- ===================== 資料表 ===================== -->
+  <div class="tablewrap" id="tablewrap" hidden>
+    <h3>原始資料與指標</h3>
+    <div class="scroll"><table class="raw" id="rawtab"></table></div>
+  </div>
+
+  <div class="foot" id="foot"></div>
+<dialog id="chart-dialog" aria-labelledby="zoom-title" aria-describedby="zoom-help">
+  <div class="zoom-toolbar"><strong id="zoom-title">放大圖表</strong><button class="btn" id="zoom-close" type="button" autofocus>縮回小圖 ×</button></div>
+  <p id="zoom-help">再次點擊圖卡可縮回，也可按 Esc；拖曳或操作按鈕不會關閉。</p>
+  <div id="zoom-host"></div>
+</dialog>
