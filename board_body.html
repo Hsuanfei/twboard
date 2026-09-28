@@ -47,10 +47,24 @@
 
     <section class="card c1">
       <h3><span class="no">01</span>主K線圖<span class="sub" id="t1sub"></span><button class="chart-save" type="button" data-chart-png="k1" aria-label="下載第 1 張圖表 PNG" title="下載圖表 PNG">↓</button></h3>
-      <div class="bb-tools"><button class="btn" id="btn-bb" type="button" aria-pressed="true">布林通道 20 / 2σ：開</button><button class="btn" id="btn-fib" type="button" aria-pressed="true">費波南希回撤：開</button><span>價格未還原 · 碰軌不代表買賣訊號</span></div>
+      <div class="k-tools no-zoom" role="group" aria-label="主K線圖設定">
+        <label class="k-range">區間 <select id="k-range" aria-label="主K線圖顯示區間"></select></label>
+        <span class="k-toggles">
+          <button class="kt" id="btn-vp" type="button" aria-pressed="true" title="右側的籌碼成本分佈、POC 與價值區">籌碼分佈</button>
+          <button class="kt" id="btn-pat" type="button" aria-pressed="true" title="K 線型態、跳空缺口、頭肩型態的標記">型態標註</button>
+          <button class="kt" id="btn-sr" type="button" aria-pressed="true" title="60 日支撐／壓力與 20 日成交均價">支撐壓力</button>
+          <button class="kt" id="btn-bb" type="button" aria-pressed="false" title="布林通道 20 日 ± 2 個標準差">布林通道</button>
+          <button class="kt" id="btn-fib" type="button" aria-pressed="false" title="目前區間的波段高低點與回撤價位">費波南希</button>
+        </span>
+        <button class="btn k-png" type="button" data-chart-png="k1" title="下載主K線圖 PNG">↓ PNG</button>
+        <span class="k-hint">滑鼠移到標記可看歷史勝率 · <b class="up">▲多方</b> <b class="down">▼空方</b> <b class="warn">◆中性</b> · 價格未還原，型態不代表買賣訊號</span>
+      </div>
+      <div class="k-pats no-zoom" id="k-pats" role="group" aria-label="要標示的型態"></div>
       <div class="chart" id="k1"></div>
-      <div class="bb-info" id="bb-info"></div>
-      <div class="bb-info fib-info" id="fib-info"></div>
+      <div class="k-summary no-zoom" id="k-summary" hidden></div>
+      <div class="bb-info" id="bb-info" hidden></div>
+      <div class="bb-info fib-info" id="fib-info" hidden></div>
+      <details class="k-legend no-zoom" id="k-legend"><summary>符號說明與這檔股票的歷史勝率</summary><div id="k-legend-body"></div></details>
       <div class="note" id="n1" style="display:none"></div>
     </section>
 

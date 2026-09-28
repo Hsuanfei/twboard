@@ -263,6 +263,19 @@ def _market_result(min_amount):
     return res
 
 
+def theme_names(themes):
+    """族群編輯器「只填代號也可以」：用最近一次掃描（或產業別清單）的股票名稱補上。"""
+    by = _market.get("by") or {}
+    info = (_market.get("raw") or {}).get("info") or {}
+    out = {}
+    for t in themes:
+        for c in t["codes"]:
+            name = (by.get(c) or {}).get("name") or (info.get(c) or {}).get("name")
+            if name:
+                out[c] = name
+    return out
+
+
 def get_market(q):
     """頁面載入時呼叫：只用本機快取，不連網；快取夠用就直接出結果。"""
     min_amount = _min_amount(q)
@@ -633,7 +646,7 @@ class Handler(BaseHTTPRequestHandler):
                 with _lock:
                     themes = MK.save_themes(items)
                     _market["results"] = {}
-                return self._json({"ok": True, "themes": themes, "custom": True})
+                return self._json({"ok": True, "themes": themes, "custom": True, "names": theme_names(themes)})
             if path == "/api/themes/reset":
                 with _lock:
                     try:
@@ -642,7 +655,7 @@ class Handler(BaseHTTPRequestHandler):
                         pass
                     _market["results"] = {}
                 themes, custom = MK.load_themes()
-                return self._json({"ok": True, "themes": themes, "custom": custom})
+                return self._json({"ok": True, "themes": themes, "custom": custom, "names": theme_names(themes)})
             if path == "/api/alerts":
                 with _lock:
                     MK.save_alert(obj.get("code"), obj.get("above"), obj.get("below"), obj.get("pct"), obj.get("note", ""))
@@ -734,7 +747,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True, "data": get_market(q)})
             if path == "/api/themes":
                 themes, custom = MK.load_themes()
-                return self._json({"ok": True, "themes": themes, "custom": custom})
+                return self._json({"ok": True, "themes": themes, "custom": custom, "names": theme_names(themes)})
             if path == "/api/alerts":
                 return self._json({"ok": True, "alerts": alerts_view()})
             if path == "/api/portfolio":
@@ -807,7 +820,7 @@ def main():
     globals()["DEMO_MODE"] = a.demo
 
     for f in ("twboard.py", "board_app.html", "board.css", "board_body.html", "board.js", "board_template.html",
-              "twcache.py", "twmacro.py", "twmarket.py", "glossary.js", "market.js"):
+              "twcache.py", "twmacro.py", "twmarket.py", "twpattern.py", "glossary.js", "market.js"):
         if not os.path.exists(os.path.join(HERE, f)):
             raise SystemExit("缺少檔案 %s，請確認所有檔案都放在同一個資料夾。" % f)
 

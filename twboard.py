@@ -62,8 +62,9 @@ import urllib.request
 import zlib
 
 import twcache as TC
+import twpattern as TP
 
-APP_VERSION = "20260925c"
+APP_VERSION = "0928a"
 APP_TITLE = "台股戰略產生器%s版" % APP_VERSION
 APP_CREDIT = "Powered by 黃炫斐(Mick Huang)"
 APP_COPYRIGHT = "Copyright (C) 2026 黃炫斐 (Mick Huang)"
@@ -200,6 +201,12 @@ def roc_to_iso(s):
         return None
     y, mo, d = int(m.group(1)) + 1911, int(m.group(2)), int(m.group(3))
     return "%04d-%02d-%02d" % (y, mo, d)
+
+
+HISTORY_YEARS = 10          # 型態歷史勝率：往回抓幾年的日K（只抓股價，增量快取，之後每天只補新的一天）
+KLINE_MAX = 250             # 主K線圖最長可切換的區間（交易日）
+KLINE_RANGES = (60, 120, 250)
+DEMO_HISTORY = 2500         # 示範資料的歷史長度（約 10 年）
 
 
 def history_calendar_days(display_days):
@@ -542,6 +549,26 @@ def fm(dataset, data_id, start, end, token, ep=None, required_dates=None):
 
 
 
+def _finmind_bars(rows):
+    bars = []
+    for r in rows or []:
+        c = to_float(r.get("close"))
+        if c is None or c <= 0 or not isinstance(r.get("date"), str):
+            continue
+        bars.append({
+            "date": r["date"],
+            "open": to_float(r.get("open"), c),
+            "high": to_float(r.get("max"), c),
+            "low": to_float(r.get("min"), c),
+            "close": c,
+            "vol": to_float(r.get("Trading_Volume"), 0) / 1000.0,   # 股 -> 張
+            "amount": to_float(r.get("Trading_money"), 0),
+            "trades": to_float(r.get("Trading_turnover"), 0),
+        })
+    bars.sort(key=lambda b: b["date"])
+    return bars
+
+
 def fetch_finmind(code, start, end, token, ep=None):
     """FinMind：各資料集互不相依，分兩批平行抓（股價＋基本資料 → 法人／融資券／除權息／大盤）。"""
     ep = ep or DEFAULT_ENDPOINTS
@@ -558,22 +585,7 @@ def fetch_finmind(code, start, end, token, ep=None):
     price, info = TC.parallel([("股價", get_price), ("股票名稱", get_info)])
     if not price:
         return None
-    bars = []
-    for r in price:
-        c = to_float(r.get("close"))
-        if c is None or c <= 0:
-            continue
-        bars.append({
-            "date": r["date"],
-            "open": to_float(r.get("open"), c),
-            "high": to_float(r.get("max"), c),
-            "low": to_float(r.get("min"), c),
-            "close": c,
-            "vol": to_float(r.get("Trading_Volume"), 0) / 1000.0,   # 股 -> 張
-            "amount": to_float(r.get("Trading_money"), 0),
-            "trades": to_float(r.get("Trading_turnover"), 0),
-        })
-    bars.sort(key=lambda b: b["date"])
+    bars = _finmind_bars(price)
     bar_dates = [b["date"] for b in bars]
 
     name = code
@@ -601,6 +613,14 @@ def fetch_finmind(code, start, end, token, ep=None):
         TC.report(detail="查詢區間內的除權息日")
         return fm("TaiwanStockDividendResult", code, start, end, token, ep)
 
+    def get_history():
+        # 型態歷史勝率用：同一個快取鍵，只會補抓分析區間以前、還沒存過的日期（第一次一個請求，之後幾乎不用連網）。
+        first = (_dt.date.fromisoformat(end) - _dt.timedelta(days=int(HISTORY_YEARS * 365.25))).isoformat()
+        if first >= start:
+            return None
+        TC.report(detail="近 %d 年日K（K 線型態歷史統計）" % HISTORY_YEARS)
+        return fm("TaiwanStockPrice", code, first, end, token, ep)
+
     def get_bench():
         if not bench_id:
             TC.warn("大盤基準：市場別未確認或不支援，暫不計算相對強弱。")
@@ -608,9 +628,11 @@ def fetch_finmind(code, start, end, token, ep=None):
         TC.report(detail="讀取同口徑價格指數")
         return fm("TaiwanStockPrice", bench_id, start, end, token, ep, required_dates=bar_dates) or []
 
-    TC.report("三大法人／融資融券／除權息／大盤基準", "四個資料集同時讀取")
-    inst, mg, dividend_rows, bench_rows = TC.parallel([
-        ("三大法人", get_inst), ("融資融券", get_margin), ("除權息", get_dividends), ("大盤基準", get_bench)])
+    TC.report("三大法人／融資融券／除權息／大盤基準", "五個資料集同時讀取")
+    inst, mg, dividend_rows, bench_rows, history_rows = TC.parallel([
+        ("三大法人", get_inst), ("融資融券", get_margin), ("除權息", get_dividends), ("大盤基準", get_bench),
+        ("歷史股價", get_history)])
+    history = _finmind_bars(history_rows) if history_rows else None
 
     chips = {}
     for r in inst:
@@ -658,7 +680,7 @@ def fetch_finmind(code, start, end, token, ep=None):
         value = to_float(r.get("close"))
         if value and value > 0 and r.get("stock_id") == bench_id:
             bench[r["date"]] = value
-    return {"bars": bars, "chips": chips, "margin": margin,
+    return {"bars": bars, "chips": chips, "margin": margin, "history": history,
             "name": name, "source": "FinMind", "market": market,
             "dividends": dividends if dividend_rows is not None else None,
             "dividend_status": dividend_status,
@@ -779,7 +801,33 @@ def fetch_twse(code, start, end, throttle=0.35, chip_days=60, ep=None):
 # 資料來源 C：合成資料 (離線測試版型用)
 # --------------------------------------------------------------------------
 
-def fetch_demo(code, days=220, seed=None):
+def _demo_history(bars, count, seed):
+    """示範資料往前延伸的歷史（型態統計用）：從第一根往回推，含隔夜跳空；不改動原本的 bars。"""
+    rnd = random.Random(seed)
+    out = []
+    first = bars[0]
+    close = first["open"]                  # 前一天的收盤＝第一根的開盤（原本的合成規則）
+    base = close
+    d = _dt.date.fromisoformat(first["date"])
+    while len(out) < count:
+        d -= _dt.timedelta(days=1)
+        if d.weekday() >= 5:
+            continue
+        shock = rnd.gauss(0, 0.019) - 0.004 * math.log(base / close)   # 往回推時慢慢拉回起始價附近
+        c = close
+        o = max(1.0, close / (1 + shock))
+        h = max(o, c) * (1 + abs(rnd.gauss(0, 0.008)))
+        l = min(o, c) * (1 - abs(rnd.gauss(0, 0.008)))
+        v = max(80.0, rnd.lognormvariate(8.4, 0.55))
+        out.append({"date": d.isoformat(), "open": round(o, 2), "high": round(h, 2), "low": round(l, 2),
+                    "close": round(c, 2), "vol": round(v, 3), "amount": round(v * 1000 * c, 0),
+                    "trades": int(v * rnd.uniform(0.8, 2.4))})
+        close = o * (1 + rnd.gauss(0, 0.004))   # 再前一天的收盤：與這天開盤之間留一點跳空
+    out.reverse()
+    return out + bars
+
+
+def fetch_demo(code, days=220, seed=None, history_days=0):
     # 用 crc32 當預設種子：原本用字元碼加總，2330 與 2303 這種同字元的代號會產生一模一樣的序列。
     rnd = random.Random(seed if seed is not None else zlib.crc32(code.encode("utf-8")))
     px = 300.0 + rnd.random() * 400
@@ -818,7 +866,11 @@ def fetch_demo(code, days=220, seed=None):
         level *= 1 + rnd2.gauss(0.0006, 0.009)
         bench[b["date"]] = round(level, 2)
     ex = bars[-12]
-    return {"bars": bars, "chips": chips, "margin": margin,
+    history = None
+    if history_days and history_days > len(bars):
+        history = _demo_history(bars, history_days - len(bars),
+                                (seed if seed is not None else zlib.crc32(code.encode("utf-8"))) + 424242)
+    return {"bars": bars, "chips": chips, "margin": margin, "history": history,
             "name": "測試樣本", "source": "合成資料（非真實行情）", "market": "twse",
             "dividends": [{"date": ex["date"], "kind": "除息", "amount": round(ex["close"] * 0.012, 2),
                            "before": ex["close"], "reference": round(ex["close"] * 0.988, 2)}],
@@ -828,6 +880,47 @@ def fetch_demo(code, days=220, seed=None):
 # --------------------------------------------------------------------------
 # 分析：把原始資料算成儀表板要的所有數字
 # --------------------------------------------------------------------------
+
+def merged_history(raw, bars):
+    """長歷史（型態統計用）＋分析用的 bars；同一天以 bars 為準，確保兩者最後幾根完全一致。"""
+    hist = raw.get("history") or []
+    if not hist:
+        return list(bars)
+    by = {b["date"]: b for b in hist if isinstance(b, dict) and b.get("close")}
+    by.update({b["date"]: b for b in bars})
+    last = bars[-1]["date"] if bars else None
+    return [by[d] for d in sorted(by) if last is None or d <= last]
+
+
+def extended_kline(raw, bars, window):
+    """主K線圖（0928a）：可切換 60／120／250 日與分析天數；均線、布林在完整歷史上計算，前段不會空白。
+    型態與缺口在最長歷史（最多 10 年）上偵測與統計，畫面只收到最後 KLINE_MAX 根內的標記。"""
+    hist = merged_history(raw, bars)
+    n = len(hist)
+    if n < 2:
+        return None, None
+    d = [b["date"] for b in hist]
+    o = [b["open"] for b in hist]
+    h = [b["high"] for b in hist]
+    l = [b["low"] for b in hist]
+    c = [b["close"] for b in hist]
+    v = [b["vol"] for b in hist]
+    size = min(n, max(KLINE_MAX, window))
+    k0 = n - size
+    ranges = sorted({min(window, size)} | {r for r in KLINE_RANGES if r <= size} | ({size} if size < KLINE_MAX else set()))
+    bb = bollinger(c)
+    cut = lambda a, nd=2: [r2(x, nd) for x in a[k0:]]
+    kline = {
+        "date": d[k0:], "open": cut(o), "high": cut(h), "low": cut(l), "close": cut(c), "vol": cut(v, 3),
+        "ma5": cut(sma(c, 5)), "ma10": cut(sma(c, 10)), "ma20": cut(sma(c, 20)), "ma60": cut(sma(c, 60)),
+        "bb_upper": cut(bb["upper"], 6), "bb_mid": cut(bb["mid"], 6), "bb_lower": cut(bb["lower"], 6),
+        "bb_percent_b": cut(bb["percent_b"], 6), "bb_width": cut(bb["width"], 6),
+        "ranges": ranges, "window": min(window, size),
+        "fib": {str(r): fibonacci(d, h, l, c, n - r) for r in ranges},
+        "history_bars": n, "history_from": d[0],
+    }
+    return kline, TP.analyse(d, o, h, l, c, size)
+
 
 def analyse(code, raw, days):
     """指標一律在「完整取得的歷史」上計算，再切出要顯示的最後 days 天。
@@ -1127,6 +1220,8 @@ def analyse(code, raw, days):
         bi = min(nb_price - 1, int((dcl[i] - p_lo) / step)) if step else 0
         vol_by_price[bi] += dvo[i]
 
+    kline, patterns = extended_kline(raw, allb, W)
+
     return {
         "code": code,
         "name": raw.get("name") or code,
@@ -1220,6 +1315,8 @@ def analyse(code, raw, days):
             "verdict": verdict, "vclass": vclass,
         },
 
+        "kline": kline,
+        "patterns": patterns,
         "heat": {"data": heat, "x": tlabels, "y": plabels,
                  "max": max((h[2] for h in heat), default=0)},
         "volprice": {"y": plabels, "v": [r2(v, 1) for v in vol_by_price]},
@@ -1373,7 +1470,7 @@ def fetch_raw(code, display_days, source="auto", token="", ep=None, throttle=0.3
 
     if source == "demo":
         TC.report("示範資料", "產生離線合成資料")
-        return fetch_demo(code, days=max(160, int(display_days) + 120))
+        return fetch_demo(code, days=max(160, int(display_days) + 120), history_days=DEMO_HISTORY)
 
     raw = None
     if source in ("auto", "finmind"):

@@ -76,7 +76,7 @@ finally:cache.cleanup()
       }
     });
     await page.goto('http://127.0.0.1:'+port);
-    assert.equal(await page.locator('h1').innerText(),'台股戰略產生器20260925c版');
+    assert.equal(await page.locator('h1').innerText(),'台股戰略產生器0928a版');
     assert.equal(await page.locator('.app-credit').innerText(),'Powered by 黃炫斐(Mick Huang)');
     await page.locator('#f-code').fill('2330');
     await page.locator('#f-source').selectOption('finmind');
@@ -87,9 +87,9 @@ finally:cache.cleanup()
     await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('完成 1 / 1'));
     await page.waitForTimeout(50);
     assert(stages.has('股價'));const all=[...stages].join('|');assert(all.includes('三大法人'));assert(all.includes('融資融券'));   // 0922c：四個資料集同一階段平行抓
-    assert.equal(done.at(-1).fetch_info.network_requests,6);
+    assert.equal(done.at(-1).fetch_info.network_requests,7);   // 0928a：多一次近 10 年日K（型態歷史勝率），之後增量
     assert.equal(await page.locator('#load-bar').getAttribute('value'),'1');
-    assert((await page.title()).includes('20260925c'));
+    assert((await page.title()).includes('0928a'));
     await page.locator('#btn-go').click();
     await page.waitForFunction(()=>!document.querySelector('#btn-go').disabled);
     await page.waitForTimeout(50);
@@ -106,7 +106,7 @@ finally:cache.cleanup()
     await page.locator('#btn-go').click();
     await page.waitForFunction(()=>!document.querySelector('#btn-go').disabled);
     await page.waitForTimeout(50);
-    assert.equal(done.at(-1).fetch_info.network_requests,5);  // 三個價量資料集補抓較早區間＋除權息（新區間）＋大盤基準
+    assert.equal(done.at(-1).fetch_info.network_requests,4);  // 法人、融資券補抓較早區間＋除權息（新區間）＋大盤基準；股價的較早區間已在 10 年歷史裡
     assert(done.at(-1).fetch_info.reused_days>0);
     assert.equal(done.at(-1).bars_count,500);
     await page.request.post('http://127.0.0.1:'+port+'/test/failure');
@@ -120,7 +120,7 @@ finally:cache.cleanup()
     const download=await dl;await download.saveAs(path.join(output,'snapshot.html'));
     const offline=await context.newPage();offline.on('pageerror',e=>errors.push(e.message));
     await offline.goto(require('url').pathToFileURL(path.join(output,'snapshot.html')).href);
-    assert((await offline.locator('.export-brand').innerText()).includes('台股戰略產生器20260925c版'));
+    assert((await offline.locator('.export-brand').innerText()).includes('台股戰略產生器0928a版'));
     assert((await offline.locator('.export-brand').innerText()).includes('Powered by 黃炫斐(Mick Huang)'));
     assert.equal(await offline.locator('#k1 canvas').count(),1);
     await page.screenshot({path:path.join(output,'complete.png'),fullPage:true});

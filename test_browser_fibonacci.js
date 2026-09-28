@@ -43,14 +43,22 @@ server.serve_forever()
     const lines=()=>page.evaluate(()=>{
       const o=echarts.getInstanceByDom(document.getElementById('k1')).getOption().series.filter(x=>x.name==='日K')[0];
       return {fib:((o.markLine||{}).data||[]).filter(m=>m.fibRatio!==undefined).map(m=>({r:m.fibRatio,y:m.yAxis,label:m.label.show})),
-              area:((o.markArea||{}).data||[]).length};
+              area:((o.markArea||{}).data||[]).filter(a=>a[0]&&a[0].fib).length};   // 另一條色帶是籌碼分佈的價值區
     });
-    // 預設開啟：七條線、38.2–61.8 色帶、讀數列
+    // 0928a：預設關閉；打開後七條線、38.2–61.8 色帶、讀數列；波段取主K線圖目前的區間（預設近 120 日）
     let s=await lines();
+    assert.equal(s.fib.length,0);assert(await page.locator('#fib-info').isHidden());
+    assert.equal(await page.locator('#btn-fib').getAttribute('aria-pressed'),'false');
+    await page.locator('#btn-fib').click();
+    s=await lines();
     assert.deepStrictEqual(s.fib.map(x=>x.r),[0,0.236,0.382,0.5,0.618,0.786,1]);
     assert.equal(s.area,1);
     assert(s.fib.some(x=>x.label),'至少要有一條線標字');
-    const info=await page.locator('#fib-info').innerText();
+    let info=await page.locator('#fib-info').innerText();
+    assert(/費波南希回撤（120 日視窗）：(上升|下跌)波段/.test(info),info);
+    // 區間切回「分析天數」：波段跟著改成 30 日
+    await page.locator('#k-range').selectOption('0');
+    info=await page.locator('#fib-info').innerText();
     assert(/費波南希回撤（30 日視窗）：(上升|下跌)波段/.test(info),info);
     assert((await page.locator('#fib-info').getAttribute('title')).includes('61.8%'));
     assert.equal(await page.locator('#btn-fib').getAttribute('aria-pressed'),'true');
@@ -63,7 +71,7 @@ server.serve_forever()
     await page.locator('#btn-fib').click();
     s=await lines();assert.equal(s.fib.length,0);assert.equal(s.area,0);
     assert(await page.locator('#fib-info').isHidden());
-    assert.equal(await page.locator('#btn-fib').innerText(),'費波南希回撤：關');
+    assert.equal(await page.locator('#btn-fib').getAttribute('aria-pressed'),'false');
 
     // 切換股票後保留開關狀態；再打開時，沒有價差的股票顯示原因而不是亂畫
     await page.locator('#compare-body [data-compare-row=FLAT] button').click();
@@ -90,11 +98,13 @@ server.serve_forever()
     const file=path.join(work,'report.html');await d.saveAs(file);
     const offline=await context.newPage();offline.on('pageerror',e=>errors.push(e.message));await offline.route(/^https?:/,r=>r.abort());
     await offline.goto('file:///'+file.replace(/\\/g,'/'));await offline.waitForTimeout(800);
+    assert(await offline.locator('#fib-info').isHidden(),'匯出檔也是預設關閉');
+    await offline.locator('#btn-fib').click();
     assert((await offline.locator('#fib-info').innerText()).includes('120 日視窗'));
     assert((await offline.locator('#foot').innerText()).includes('沒有可靠的證據'));
     await offline.locator('#btn-fib').click();assert(await offline.locator('#fib-info').isHidden());
     assert.deepStrictEqual(errors,[]);
-    console.log('PASS: Fibonacci overlay default-on, 7 levels + golden zone, non-overlapping labels, readout/tooltip, toggle persists across stocks, flat-price reason, window follows days, responsive no clipping, offline export');
+    console.log('PASS: Fibonacci overlay default-off (0928a), follows chart range (120 / analysis days), 7 levels + golden zone, non-overlapping labels, readout/tooltip, toggle persists across stocks, flat-price reason, window follows days, responsive no clipping, offline export');
   }finally{
     if(browser)await browser.close();child.kill();
     try{fs.rmSync(work,{recursive:true,force:true});}catch(e){}

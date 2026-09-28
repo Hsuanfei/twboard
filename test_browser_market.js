@@ -2,7 +2,8 @@
  * Copyright (C) 2026 黃炫斐 (Mick Huang)
  * 本檔案是「台股戰略產生器」的一部分：自由軟體，依 GNU GPL 第 3 版釋出，不附任何擔保，詳見 LICENSE。
  * 匯出的報告另有額外許可，見 LICENSE-EXCEPTION.md。 */
-/* 20260925a：市場掃描 — 選股清單、漲幅排行、ETF、族群輪動、概念族群編輯、到價警示、模擬持倉。 */
+/* 20260925a：市場掃描 — 選股清單、漲幅排行、ETF、族群輪動、概念族群編輯、到價警示、模擬持倉。
+   0928a：族群輪動五種圖表（四象限雷達、強弱熱力矩陣、排名變化、象限時間軸、動能加速度）與逐列的自訂族群編輯器。 */
 const { chromium, python, launchOptions } = require('./test_support');
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -30,12 +31,12 @@ const num=t=>Number(String(t).replace(/[^\d.+-]/g,''));
     const output=path.join(__dirname,'qa-20260925a');fs.mkdirSync(output,{recursive:true});
     browser=await chromium.launch(launchOptions());
     const errors=[];
-    const context=await browser.newContext({viewport:{width:1600,height:1000}});
+    const context=await browser.newContext({viewport:{width:1600,height:1000},acceptDownloads:true});
     const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));
     // 驗證失敗（400）是本測試故意觸發的，其他 console 錯誤都要算
     page.on('console',m=>{if(m.type()==='error'&&!/status of 400/.test(m.text()))errors.push(m.text());});
     await page.goto(base);
-    assert((await page.locator('h1').innerText()).includes('20260925c'));
+    assert((await page.locator('h1').innerText()).includes('0928a'));
     await page.waitForFunction(()=>document.querySelector('#mk-meta').textContent.includes('尚未掃描'));
     assert.equal(await page.locator('#mk-scan').innerText(),'開始掃描');
     assert((await page.locator('#mk-note').innerText()).includes('第一次'));
@@ -107,6 +108,25 @@ const num=t=>Number(String(t).replace(/[^\d.+-]/g,''));
     assert(await page.locator('#mk-members').isVisible());
     assert((await page.locator('#mk-members').innerText()).includes(name));
     assert(await page.locator('#mk-member-table tbody tr').count()>=3);
+    // 0928a：點族群後，四象限雷達畫出這個族群最近 10 天的軌跡
+    const trail=await page.evaluate(()=>{const c=echarts.getInstanceByDom(document.getElementById('mk-sector-chart'));return c.getOption().series.filter(x=>x.name==='軌跡')[0].data.length;});
+    assert(trail>=5,'軌跡點數 '+trail);
+    const shape=await page.evaluate(()=>{const d=TWMarket.data();return {dates:d.sector_dates.length,hist:d.sectors[0].hist.r5.length,market:d.market_hist.day.length};});
+    assert.deepEqual(shape,{dates:20,hist:20,market:20},'最近 20 個交易日的族群軌跡');
+    for(const v of ['heat','rank','timeline','accel']){
+      await page.locator('[data-mk-view='+v+']').click();
+      await page.waitForFunction(()=>document.querySelector('#mk-sector-chart canvas'));
+      assert.equal(await page.locator('[data-mk-view='+v+']').getAttribute('aria-selected'),'true');
+      assert((await page.locator('#mk-sector-rule').innerText()).length>20);
+      await page.locator('[data-mk-panel=sector]').screenshot({path:path.join(output,'sector-'+v+'.png')});
+    }
+    const bars=await page.evaluate(()=>echarts.getInstanceByDom(document.getElementById('mk-sector-chart')).getOption().series[0].data.map(d=>d.value));
+    assert(bars.length>=10&&bars.every((v,i)=>!i||bars[i-1]<=v),'動能加速度由小到大畫（最大的在最上面）');
+    await page.locator('[data-mk-view=heat]').click();
+    await page.locator('[data-mk-heat=rel]').click();
+    assert.equal(await page.locator('[data-mk-heat=rel]').getAttribute('aria-pressed'),'true');
+    await page.locator('[data-mk-view=radar]').click();
+    await page.waitForFunction(()=>document.querySelector('#mk-sector-chart canvas'));
     await page.locator('[data-mk-kind=概念]').click();
     const kinds=await page.locator('#mk-sector-table tbody td:nth-child(2)').allInnerTexts();
     assert(kinds.length&&kinds.every(k=>k==='概念'));
@@ -115,20 +135,34 @@ const num=t=>Number(String(t).replace(/[^\d.+-]/g,''));
     const r20=(await page.locator('#mk-sector-table tbody td:nth-child(6)').allInnerTexts()).map(num);
     assert(r20.every((v,i)=>!i||r20[i-1]>=v),'20 日由高到低');
 
-    /* ---- 概念族群編輯 ---- */
-    await page.locator('#mk-themes summary').click();
+    /* ---- 自訂族群：每列一個族群，只填代號也可以（自動帶入名稱），匯出／匯入 JSON ---- */
+    assert(await page.locator('#mk-themes').isHidden());
+    await page.locator('#mk-theme-open').click();
     await page.waitForFunction(()=>document.querySelectorAll('#mk-theme-rows .mk-theme').length>=10);
-    const members=(await page.evaluate(()=>TWMarket.data().stocks.filter(s=>s.kind==='stock').slice(0,4).map(s=>s.code)));
+    const firstCodes=await page.locator('#mk-theme-rows .mk-theme').first().locator('.mk-te-codes').inputValue();
+    assert(/^\d{4} \S+, \d{4} \S+/.test(firstCodes),'成分股顯示成「代號 名稱」：'+firstCodes);
+    const members=(await page.evaluate(()=>TWMarket.data().stocks.filter(s=>s.kind==='stock').slice(0,4).map(s=>({code:s.code,name:s.name}))));
     await page.locator('#mk-theme-add').click();
     const last=page.locator('#mk-theme-rows .mk-theme').last();
-    await last.locator('input').fill('我的測試族群');await last.locator('textarea').fill(members.join(', '));
+    await last.locator('.mk-te-name').fill('我的測試族群');await last.locator('.mk-te-codes').fill(members.map(m=>m.code).join(', '));
+    await last.locator('.mk-te-codes').dispatchEvent('change');
+    assert((await last.locator('.mk-te-codes').inputValue()).includes(members[0].code+' '+members[0].name),'只填代號時自動帶入名稱');
     await page.locator('#mk-theme-save').click();
     await page.waitForFunction(()=>document.querySelector('#mk-theme-msg').textContent.includes('已儲存'));
     await page.waitForFunction(()=>document.querySelector('#mk-sector-table').textContent.includes('我的測試族群'));
     assert((await page.locator('#mk-theme-state').innerText()).includes('自訂'));
-    await page.locator('#mk-theme-rows .mk-theme').last().locator('textarea').fill('2330');
+    await page.locator('#mk-themes').screenshot({path:path.join(output,'themes-editor.png')});
+    const exp=page.waitForEvent('download');await page.locator('#mk-theme-export').click();
+    const file=await (await exp).path();const exported=JSON.parse(fs.readFileSync(file,'utf8'));
+    assert(exported.themes.some(t=>t.name==='我的測試族群'&&t.codes.join()===members.map(m=>m.code).join()),'匯出的 JSON 只存代號');
+    await page.locator('#mk-theme-file').setInputFiles({name:'themes.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify({themes:[{name:'匯入族群',codes:members.slice(0,3).map(m=>m.code)}]}))});
+    await page.waitForFunction(()=>document.querySelector('#mk-theme-msg').textContent.includes('已載入 1 個族群'));
+    assert.equal(await page.locator('#mk-theme-rows .mk-theme').count(),1);
+    await page.locator('#mk-theme-rows .mk-theme').last().locator('.mk-te-codes').fill('2330 台積電');
     await page.locator('#mk-theme-save').click();
     await page.waitForFunction(()=>document.querySelector('#mk-theme-msg').textContent.includes('2～60'));
+    assert(await page.locator('#mk-theme-msg').evaluate(n=>n.classList.contains('warn')));
+    await page.locator('#mk-theme-close').click();assert(await page.locator('#mk-themes').isHidden());
 
     /* ---- 到價警示：從 18 格的按鈕預填 ---- */
     await page.locator('#btn-alert').click();
@@ -195,7 +229,7 @@ const num=t=>Number(String(t).replace(/[^\d.+-]/g,''));
     await mobile.close();
 
     assert.deepEqual(errors,[]);
-    console.log('PASS: scan job, 8 screens (sorted, tagged, market filter), click-to-analyse + multi-select, gain/loss/amount ranking, ETF list with leveraged toggle, sector quadrant chart/table/members/sort, theme editor save + validation, price alerts from grid (trigger/badge/ack/validation), paper buy/sell P&L, glossary entry, collapse persisted, cached reload, mobile');
+    console.log('PASS: scan job, 8 screens (sorted, tagged, market filter), click-to-analyse + multi-select, gain/loss/amount ranking, ETF list with leveraged toggle, sector quadrant chart/table/members/sort, theme row editor (auto names, save, export/import JSON, validation), sector views (radar trail, heatmap, rank change, timeline, acceleration), price alerts from grid (trigger/badge/ack/validation), paper buy/sell P&L, glossary entry, collapse persisted, cached reload, mobile');
   }finally{
     if(browser)await browser.close();
     child.kill();

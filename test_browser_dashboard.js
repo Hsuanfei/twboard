@@ -40,7 +40,7 @@ server.serve_forever()
     await page.goto('http://127.0.0.1:'+port);
     await page.locator('#f-code').fill('2360');await page.locator('#f-days').fill('100');await page.locator('#btn-go').click();
     await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('完成 1 / 1'));
-    assert((await page.locator('h1').innerText()).includes('20260925c'));
+    assert((await page.locator('h1').innerText()).includes('0928a'));
     assert.equal(await page.locator('.card:visible').count(),18);
     assert(await page.locator('.compare-scroll').isHidden());
     await page.locator('#compare-toggle').click();assert(await page.locator('.compare-scroll').isVisible());
@@ -48,7 +48,7 @@ server.serve_forever()
     for(const id of ['h-open','h-high','h-low','h-trades','h-days'])assert((await page.locator('#'+id).innerText()).trim());
     await page.screenshot({path:path.join(output,'dashboard-desktop.png'),fullPage:true});
     const positions=await page.locator('.card').evaluateAll(ns=>ns.map(n=>({c:n.className,y:n.getBoundingClientRect().y,w:n.clientWidth,h:n.clientHeight,overflow:n.scrollHeight-n.clientHeight})));
-    assert.equal(new Set(positions.map(p=>p.y)).size,4);assert(positions.every(p=>p.overflow<=2),'Clipped desktop card');console.log('Card layout',positions);
+    assert.equal(new Set(positions.map(p=>p.y)).size,5,'0928a：主K線圖獨佔第一列，其餘 17 格排成 4 列');assert(positions.every(p=>p.overflow<=2),'Clipped desktop card');console.log('Card layout',positions);
     for(const [view,count] of [['risk',6],['kd',3],['macd',3],['raw',0],['bt',0],['all',18]]){
       await page.locator('.analysis-tabs [data-view='+view+']').click();assert.equal(await page.locator('.card:visible').count(),count);
       assert.equal(await page.locator('#tablewrap').isVisible(),view==='raw');
@@ -64,7 +64,7 @@ server.serve_forever()
     await d.saveAs(path.join(output,'report.html'));
     const offline=await context.newPage();offline.on('pageerror',e=>errors.push(e.message));await offline.route(/^https?:/,r=>r.abort());
     await offline.goto('file:///'+path.join(output,'report.html').replace(/\\/g,'/'));
-    assert((await offline.title()).includes('20260925c'));assert(await offline.locator('#dl-csv').isHidden());
+    assert((await offline.title()).includes('0928a'));assert(await offline.locator('#dl-csv').isHidden());
     await offline.locator('.analysis-tabs [data-view=raw]').click();assert(await offline.locator('#rawtab').isVisible());
     wait=offline.waitForEvent('download');await offline.locator('#btn-main-png').click();d=await wait;
     assert.equal(await offline.locator('.card:visible').count(),18);assert.equal(await d.failure(),null);
@@ -78,6 +78,6 @@ server.serve_forever()
     }
     await page.locator('.c1').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(output,'dashboard-mobile-detail.png')});
     assert.deepStrictEqual(errors,[]);
-    console.log('PASS: 18 cards/four rows, version/header fields, comparison collapse, 6 views incl. backtest, chart PNGs, offline report/PNG, responsive layouts, no browser errors');
+    console.log('PASS: 18 cards/five rows (main chart full width), version/header fields, comparison collapse, 6 views incl. backtest, chart PNGs, offline report/PNG, responsive layouts, no browser errors');
   }finally{if(browser)await browser.close();child.kill();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -72,7 +72,14 @@ DEFAULT_THEMES = [
     {"name": "機器人", "codes": ["2049", "1590", "4583", "2359", "8374", "1597"]},
     {"name": "低軌衛星", "codes": ["3491", "2314", "6285"]},
     {"name": "軍工／無人機", "codes": ["2634", "8033", "5222"]},
+    {"name": "半導體 IC 設計", "codes": ["2454", "3034", "2379", "6415", "3035", "4966", "5269"]},
+    {"name": "半導體設備", "codes": ["2404", "6196", "3680", "5536", "6139", "3131", "3583"]},
+    {"name": "網通設備", "codes": ["2345", "5388", "3596", "6285", "2332", "3380", "4906"]},
+    {"name": "面板", "codes": ["2409", "3481", "6116", "8069"]},
+    {"name": "綠能（太陽能／風電）", "codes": ["3576", "6443", "6244", "6806", "9958"]},
+    {"name": "汽車／電動車", "codes": ["2201", "2207", "1536", "1522", "2231", "3665"]},
 ]
+HIST_DAYS = 20            # 族群輪動的歷史軌跡：最近幾個交易日
 
 
 def _theme_name(name):
@@ -95,18 +102,22 @@ def normalize_themes(items):
         seen.add(name)
         raw = it.get("codes")
         if isinstance(raw, str):
-            raw = re.split(r"[,，、\s]+", raw)
+            raw = re.split(r"[,，、;；\n]+", raw)
         if not isinstance(raw, list):
             raise ValueError("「%s」的代號格式不正確" % name)
         codes = []
-        for c in raw:
-            c = str(c).strip().upper()
-            if not c:
+        for item in raw:
+            # 「3661 世芯-KY」：第一段是代號、後面是名稱；「2330 2317 2454」（全部都是代號）則每段都算
+            toks = str(item).split()
+            if not toks:
                 continue
-            if not (STOCK_RE.match(c) or ETF_RE.match(c)):
-                raise ValueError("「%s」有無效的代號：%s" % (name, c[:10]))
-            if c not in codes:
-                codes.append(c)
+            is_code = lambda t: bool(STOCK_RE.match(t.upper()) or ETF_RE.match(t.upper()))
+            for c in (toks if all(is_code(t) for t in toks) else toks[:1]):
+                c = c.strip().upper()
+                if not is_code(c):
+                    raise ValueError("「%s」有無效的代號：%s（代號要寫在名稱前面）" % (name, c[:10]))
+                if c not in codes:
+                    codes.append(c)
         if not 2 <= len(codes) <= MAX_THEME_CODES:
             raise ValueError("「%s」請放 2～%d 檔" % (name, MAX_THEME_CODES))
         out.append({"name": name, "codes": codes})
@@ -837,8 +848,33 @@ def quadrant(r5, r20):
     return ("領漲" if r5 >= 0 else "轉弱") if r20 >= 0 else ("轉強" if r5 >= 0 else "落後")
 
 
-def sector_table(groups, by, min_amount):
-    """groups：[(名稱, 類型, [代號])]。報酬取成員的等權平均（先用 20 日均成交值達門檻的成員）。"""
+def _back_pct(closes, j, k):
+    """closes 與日期對齊（沒交易為 None）：第 j 天相對 k 個交易日前的漲跌（%）；那天沒交易就再往前找最多 3 天。"""
+    c = closes[j] if 0 <= j < len(closes) else None
+    if c is None:
+        return None
+    for jj in range(j - k, j - k - 4, -1):
+        if 0 <= jj and closes[jj] is not None:
+            return (c / closes[jj] - 1) * 100.0 if closes[jj] > 0 else None
+    return None
+
+
+def history_series(members, closes, ndates, days=HIST_DAYS):
+    """最近 days 個交易日，每天成員的等權平均：當日漲跌、5 日、20 日報酬（算不出來為 None）。"""
+    idx = range(max(1, ndates - days), ndates)
+
+    def one(k):
+        out = []
+        for j in idx:
+            vals = [v for v in (_back_pct(closes[c], j, k) for c in members if c in closes) if v is not None]
+            out.append(T.r2(_mean(vals)) if vals else None)
+        return out
+    return {"day": one(1), "r5": one(5), "r20": one(20)}
+
+
+def sector_table(groups, by, min_amount, closes=None, ndates=0):
+    """groups：[(名稱, 類型, [代號])]。報酬取成員的等權平均（先用 20 日均成交值達門檻的成員）。
+    有 closes 時另外附上最近 HIST_DAYS 個交易日的軌跡（熱力矩陣、排名變化、象限時間軸、動能加速度用）。"""
     out = []
     for name, kind, codes in groups:
         members = [by[c] for c in codes if c in by]
@@ -851,7 +887,9 @@ def sector_table(groups, by, min_amount):
         r5, r20, r60 = avg("r5"), avg("r20"), avg("r60")
         rep = sorted(use, key=lambda s: -(s["amount20"] or 0))[:5]
         today = [s["chg_pct"] for s in use if s["chg_pct"] is not None]
+        hist = history_series([s["code"] for s in use], closes, ndates) if closes is not None and ndates > 1 else None
         out.append({"name": name, "kind": kind, "count": len(use), "total": len(codes),
+                    "amount": round(sum(s["amount20"] or 0 for s in use)), "hist": hist,
                     "r5": T.r2(r5), "r20": T.r2(r20), "r60": T.r2(r60), "today": T.r2(_mean(today)),
                     "up_ratio": T.r2(sum(1 for v in today if v > 0) / len(today) * 100, 0) if today else None,
                     "vol": T.r2(statistics.median(vols), 1) if vols else None,
@@ -867,7 +905,7 @@ def analyse(raw, themes, min_amount=3e7):
     dates = sorted(set(raw["twse"]) | set(raw["tpex"]))
     if len(dates) < 6:
         raise ValueError("全市場資料只有 %d 個交易日，至少需要 6 天" % len(dates))
-    stocks = []
+    stocks, closes = [], {}
     for market, quotes, chips in (("上市", raw["twse"], raw["twse_chips"]), ("上櫃", raw["tpex"], raw["tpex_chips"])):
         codes = set()
         for d in dates[-3:]:
@@ -879,6 +917,7 @@ def analyse(raw, themes, min_amount=3e7):
             m = stock_metrics(code, market, dates, series, chips, raw["info"])
             if m:
                 stocks.append(m)
+                closes[code] = [r[3] if r else None for r in series]
     by = {s["code"]: s for s in stocks}
     common = [s for s in stocks if s["kind"] == "stock"]
     universe = [s for s in common if (s["amount20"] or 0) >= min_amount]
@@ -892,7 +931,8 @@ def analyse(raw, themes, min_amount=3e7):
         if s["industry"]:
             industries.setdefault(s["industry"], []).append(s["code"])
     groups = [(k, "產業", v) for k, v in sorted(industries.items())] + [(t["name"], "概念", t["codes"]) for t in themes]
-    sectors = sector_table(groups, by, min_amount)
+    sectors = sector_table(groups, by, min_amount, closes, len(dates))
+    market_hist = history_series([s["code"] for s in (universe or common)], closes, len(dates))
     for g in sectors:
         for c in g["members"]:
             by[c].setdefault("groups", []).append(g["name"])
@@ -918,6 +958,7 @@ def analyse(raw, themes, min_amount=3e7):
         "stocks": sorted(stocks, key=lambda s: s["code"]), "screens": lists,
         "screen_defs": [{"key": k, "label": l, "rule": r} for k, l, r in SCREENS],
         "sectors": sectors,
+        "sector_dates": dates[max(1, len(dates) - HIST_DAYS):], "market_hist": market_hist,
     }
 
 
@@ -1138,6 +1179,16 @@ def demo_raw(trading_days=61, seed=11):
     dates.reverse()
     twse, tpex, tw_c, tp_c = {d: {} for d in dates}, {d: {} for d in dates}, {}, {}
     info = {}
+    # 族群輪動的示範效果：每個產業／概念族群有自己的週期波動，讓象限隨時間轉換
+    theme_of = {}
+    for t in DEFAULT_THEMES:
+        for c in t["codes"]:
+            theme_of.setdefault(c, t["name"])
+
+    def wave(key):
+        r0 = random.Random(zlib.crc32(key.encode()) ^ seed)
+        amp, period, phase = r0.uniform(0.002, 0.007), r0.uniform(26, 48), r0.uniform(0, 6.283)
+        return lambda t: amp * math.sin(6.283 * t / period + phase)
     for i, code in enumerate(codes + etfs):
         r = random.Random(zlib.crc32(code.encode()) ^ seed)
         market = "tpex" if (code[0] in "345689" and i % 3 == 0) else "twse"
@@ -1146,8 +1197,10 @@ def demo_raw(trading_days=61, seed=11):
         px, drift = 20 + r.random() * 400, r.gauss(0.0008, 0.002)
         base = r.choice([300, 800, 2000, 6000, 20000])
         prev = px
-        for d in dates:
-            ret = r.gauss(drift, 0.022)
+        w1 = wave(info[code]["industry"] or "etf")
+        w2 = wave(theme_of[code]) if code in theme_of else (lambda t: 0.0)
+        for t, d in enumerate(dates):
+            ret = r.gauss(drift, 0.022) + w1(t) + w2(t)
             px = max(1.0, px * (1 + ret))
             hi, lo = px * (1 + abs(r.gauss(0, 0.01))), px * (1 - abs(r.gauss(0, 0.01)))
             vol = base * (0.5 + r.random() * 1.2) * (2.5 if r.random() < 0.05 else 1)

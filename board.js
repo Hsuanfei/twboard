@@ -9,8 +9,6 @@
 "use strict";
 var P = null;
 var activeView = 'all';
-var showBB = true;
-var showFib = true;
 var strategyChart=null, strategyResult=null;
 var css = function(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); };
 var charts = [];
@@ -33,7 +31,13 @@ function scaleChartFonts(opt){
   }
   visit(opt);return opt;
 }
-function resizeCharts(){charts.forEach(function(c){c.resize();});macroCharts.forEach(function(c){c.resize();});if(strategyChart)strategyChart.resize();}
+function resizeCharts(){
+  /* 主K線圖的籌碼分佈寬度依圖寬計算：寬度變化超過 15%（例如手機轉向、視窗縮放）就整張重畫 */
+  var k=el('k1'), kc=k&&echarts.getInstanceByDom(k);
+  if(kc&&k1Width&&Math.abs((k.clientWidth||0)-k1Width)>k1Width*0.15){ redrawK1(); }
+  charts.forEach(function(c){c.resize();});macroCharts.forEach(function(c){c.resize();});if(strategyChart)strategyChart.resize();
+}
+var k1Width=0;
 function closeZoom(){
   if(!zoomed)return;
   var node=zoomed,focus=zoomFocus;zoomed=null;
@@ -82,7 +86,7 @@ function bindAppearance(){
     if(moved&&e.detail!==0)return;
     var b=e.target.closest('.chart-expand');
     if(b){openZoom(b.closest('.card,.dmi-panel,.macro-chart'),b);return;}
-    if(e.target.closest('button,a,input,select,label,summary'))return;
+    if(e.target.closest('button,a,input,select,label,summary,.no-zoom'))return;
     if(window.getSelection()&&!window.getSelection().isCollapsed)return;
     var node=e.target.closest('.card,#strategy-chart,.dmi-panel,.macro-chart');
     if(node){if(zoomed===node)closeZoom();else openZoom(node);}
@@ -158,34 +162,133 @@ function mk(id, opt){
 }
 
 /* ========================================================================
-   01 主K線 + 均線 + 量
+   01 主K線圖（0928a）：可切換區間、K 線型態標註與歷史勝率、跳空缺口、頭肩型態、
+   籌碼成本分佈（POC／價值區），以及原本的均線、布林通道、費波南希、支撐壓力。
+   開關與區間記在這台電腦的瀏覽器；離線匯出的報告也能用。
    ======================================================================== */
+var K1 = {range:null, bb:false, fib:false, sr:true, vp:true, pat:true, off:{}, legend:null};
+(function(){
+  try{
+    var o=JSON.parse(localStorage.getItem('twboard.k1')||'{}');
+    if(o&&typeof o==='object'){
+      ['bb','fib','sr','vp','pat'].forEach(function(k){ if(typeof o[k]==='boolean') K1[k]=o[k]; });
+      if(typeof o.range==='number') K1.range=o.range;
+      if(o.off&&typeof o.off==='object') K1.off=o.off;
+      if(o.legend&&typeof o.legend==='object') K1.legend=o.legend;
+    }
+  }catch(e){}
+})();
+function saveK1(){ try{ localStorage.setItem('twboard.k1',JSON.stringify(K1)); }catch(e){} }
+var KFIELDS=['date','open','high','low','close','vol','ma5','ma10','ma20','ma60','bb_upper','bb_mid','bb_lower','bb_percent_b','bb_width'];
+var KSTD=[60,120,250];
+function kWindow(){ return P.kline ? P.kline.window : P.series.date.length; }
+function kRanges(){ return (P.kline&&P.kline.ranges&&P.kline.ranges.length) ? P.kline.ranges : [P.series.date.length]; }
+function kRange(){
+  var opts=kRanges(), W=kWindow(), want=K1.range, fit;
+  if(want===0 && opts.indexOf(W)>=0) return W;
+  if(want && opts.indexOf(want)>=0) return want;
+  if(want){ fit=opts.filter(function(r){return r<=want;}); if(fit.length) return fit[fit.length-1]; }
+  var def=Math.max(120,W);
+  fit=opts.filter(function(r){return r<=def;});
+  return fit.length ? fit[fit.length-1] : opts[0];
+}
+function kview(){
+  var k=P.kline;
+  if(!k||!k.date||!k.date.length) return {s:P.series, fib:P.fibonacci, off:0, r:P.series.date.length, n:P.series.date.length};
+  var r=kRange(), n=k.date.length, off=n-r, s={};
+  KFIELDS.forEach(function(f){ s[f]=(k[f]||[]).slice(off); });
+  var fib=(k.fib&&k.fib[String(r)]) || (r===k.window ? P.fibonacci : null);
+  return {s:s, fib:fib, off:off, r:r, n:n};
+}
+function alpha(color, a){
+  var m=/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(color||'').trim());
+  if(!m) return color;
+  var h=m[1].length===3 ? m[1].replace(/./g,function(c){return c+c;}) : m[1];
+  return 'rgba('+parseInt(h.slice(0,2),16)+','+parseInt(h.slice(2,4),16)+','+parseInt(h.slice(4,6),16)+','+a+')';
+}
+function patDefs(){ var m={}; ((P.patterns&&P.patterns.defs)||[]).forEach(function(d){m[d.key]=d;}); return m; }
+function dirColor(dir){ return dir==='bull'?C.up:dir==='bear'?C.down:C.warn; }
+function dirGlyph(dir){ return dir==='bull'?'▲':dir==='bear'?'▼':'◆'; }
+function patShown(key){ return K1.pat && !K1.off[key]; }
+
+/* 籌碼成本分佈：把每天的成交量平均攤到當天最低～最高價之間（估計值，不是逐筆成交） */
+function volumeProfile(s, a, b, bins){
+  var lo=Infinity, hi=-Infinity, i;
+  for(i=a;i<=b;i++){ if(s.low[i]!=null&&s.low[i]<lo) lo=s.low[i]; if(s.high[i]!=null&&s.high[i]>hi) hi=s.high[i]; }
+  if(!(hi>lo)) return null;
+  var step=(hi-lo)/bins, up=[], dn=[];
+  for(i=0;i<bins;i++){ up.push(0); dn.push(0); }
+  for(i=a;i<=b;i++){
+    var l=s.low[i], h=s.high[i], v=s.vol[i];
+    if(l==null||h==null||!v) continue;
+    var bag=(s.close[i]>=s.open[i]) ? up : dn;
+    if(h<=l){ bag[Math.min(bins-1,Math.max(0,Math.floor((s.close[i]-lo)/step)))]+=v; continue; }
+    var b0=Math.max(0,Math.floor((l-lo)/step)), b1=Math.min(bins-1,Math.floor((h-lo)/step));
+    for(var k=b0;k<=b1;k++){
+      var ov=Math.min(h,lo+(k+1)*step)-Math.max(l,lo+k*step);
+      if(ov>0) bag[k]+=v*ov/(h-l);
+    }
+  }
+  var tot=[], total=0, poc=0;
+  for(i=0;i<bins;i++){ tot.push(up[i]+dn[i]); total+=tot[i]; if(tot[i]>tot[poc]) poc=i; }
+  if(!total) return null;
+  var lo_b=poc, hi_b=poc, acc=tot[poc];
+  while(acc<total*0.7 && (lo_b>0||hi_b<bins-1)){
+    var above=hi_b<bins-1?tot[hi_b+1]:-1, below=lo_b>0?tot[lo_b-1]:-1;
+    if(above>=below){ hi_b++; acc+=above; } else { lo_b--; acc+=below; }
+  }
+  return {lo:lo, step:step, up:up, dn:dn, tot:tot, bins:bins, poc_bin:poc, lo_bin:lo_b, hi_bin:hi_b,
+          poc:lo+(poc+0.5)*step, vah:lo+(hi_b+1)*step, val:lo+lo_b*step, max:tot[poc], total:total};
+}
+function vpSeriesParts(vp){
+  if(!vp) return {data:[],line:[],area:[],candleLine:[],candleArea:[],xmax:1};
+  var data=[];
+  for(var i=0;i<vp.bins;i++){
+    data.push([vp.lo+i*vp.step, vp.lo+(i+1)*vp.step, vp.up[i], vp.dn[i], i===vp.poc_bin?1:0, (i>=vp.lo_bin&&i<=vp.hi_bin)?1:0]);
+  }
+  var lab=function(text,color,pos){return {show:true,position:pos,formatter:text,color:color,fontWeight:'bold',fontSize:11*fontScale,
+    backgroundColor:'rgba(12,16,24,.72)',padding:[1,4],borderRadius:3};};
+  return {
+    data:data, xmax:vp.max*1.1,
+    line:[{yAxis:vp.vah,name:'VAH',lineStyle:{color:C.up,type:'dotted',opacity:.55},label:lab('壓力帶 VAH '+nf(vp.vah),C.up,'insideEndTop')},
+          {yAxis:vp.poc,name:'POC',lineStyle:{color:C.warn,type:'dashed',width:1.4},label:lab('POC '+nf(vp.poc),C.warn,'insideEndTop')},
+          {yAxis:vp.val,name:'VAL',lineStyle:{color:C.down,type:'dotted',opacity:.55},label:lab('支撐帶 VAL '+nf(vp.val),C.down,'insideEndBottom')}],
+    area:[[{yAxis:vp.val,itemStyle:{color:'rgba(96,140,255,.08)'}},{yAxis:vp.vah}]],
+    candleLine:[{name:'POC',yAxis:vp.poc,vp:true,lineStyle:{color:C.warn,type:'dashed',width:1.3,opacity:.9},label:{show:false}}],
+    candleArea:[[{yAxis:vp.val,itemStyle:{color:'rgba(96,140,255,.075)'}},{yAxis:vp.vah}]]
+  };
+}
+function spanLabel(){ return (P.patterns&&P.patterns.span&&P.patterns.span.label)||'歷史'; }
+function statLine(st, h){
+  h=h||5;
+  if(!st||!st['n'+h]) return '歷史上沒有可統計的樣本';
+  return h+' 日上漲機率 '+nf(st['up'+h],0)+'%（'+spanLabel()+' n='+st['n'+h]+'，平均 '+sg(st['avg'+h])+'%）';
+}
+
 function card01(){
-  var s=P.series, t=P.tech;
+  var v=kview(), s=v.s, t=P.tech, R=s.date.length;
   var kd = s.date.map(function(_,i){ return [s.open[i],s.close[i],s.low[i],s.high[i]]; });
-  var vols = s.vol.map(function(v,i){ return {value:v, itemStyle:{color: s.close[i]>=s.open[i]?C.up:C.down, opacity:.62}}; });
+  var vols = s.vol.map(function(x,i){ return {value:x, itemStyle:{color: s.close[i]>=s.open[i]?C.up:C.down, opacity:.62}}; });
   el('t1sub').textContent = 'MA5 '+nf(t.ma5)+'　MA20 '+nf(t.ma20)+'　MA60 '+nf(t.ma60);
-
   var line=function(name,data,color,w){ return {name:name,type:'line',data:data,smooth:false,symbol:'none',
-      lineStyle:{width:w||1.6,color:color}, z:3, connectNulls:false}; };
+      lineStyle:{width:w||1.6,color:color}, z:3, connectNulls:false, xAxisIndex:0, yAxisIndex:0}; };
+  var DEF=patDefs(), pat=P.patterns||null;
+  /* 均線顏色避開紅／綠（漲跌色）；色盲友善配色時再避開橘／藍 */
+  var MAC=document.documentElement.getAttribute('data-cb')==='1'?['#f5e663','#9be3c3','#c38bff','#d9d9d9']:['#f2b134','#7fd0a8','#b196ff','#5aa9e6'];
 
-  /* 支撐／壓力看的是 60 日，短視窗時可能落在畫面外。
-     把它們納入 Y 軸範圍，但若因此讓價格區間撐大超過 60%，就不畫那條線，改在註腳說明，
-     以免 K 棒被壓扁。 */
-  var dLo = Math.min.apply(null, s.low), dHi = Math.max.apply(null, s.high);
-  /* 均線也要算進 Y 軸範圍，否則急漲急跌後落在 K 棒區間外的均線會被裁掉，
-     看起來像「均線從中間才開始」。MA60 離得太遠時才放棄它，避免壓扁 K 棒。 */
+  /* Y 軸範圍：K 棒、均線（MA60 離太遠時不撐開）、布林、支撐壓力 */
+  var dLo = Math.min.apply(null, s.low.filter(function(x){return x!=null;})), dHi = Math.max.apply(null, s.high.filter(function(x){return x!=null;}));
   (function(){
     var baseSpan = (dHi - dLo) || 1;
     ['ma5','ma10','ma20','ma60'].forEach(function(k){
-      var vals = s[k].filter(function(v){ return v!==null && v!==undefined; });
+      var vals = (s[k]||[]).filter(function(x){ return x!==null && x!==undefined; });
       if(!vals.length) return;
       var lo = Math.min(dLo, Math.min.apply(null, vals)), hi = Math.max(dHi, Math.max.apply(null, vals));
       if(k !== 'ma60' || (hi - lo) <= baseSpan * 1.5){ dLo = lo; dHi = hi; }
     });
   })();
-  if(showBB && s.bb_upper){
-    var bounds=s.bb_upper.concat(s.bb_lower).filter(function(v){return v!==null&&v!==undefined;});
+  if(K1.bb && s.bb_upper){
+    var bounds=s.bb_upper.concat(s.bb_lower).filter(function(x){return x!==null&&x!==undefined;});
     if(bounds.length){dLo=Math.min(dLo,Math.min.apply(null,bounds));dHi=Math.max(dHi,Math.max.apply(null,bounds));}
   }
   var span = (dHi - dLo) || 1;
@@ -194,20 +297,20 @@ function card01(){
     if(val===null||val===undefined) return;
     var lo = Math.min(dLo, val), hi = Math.max(dHi, val);
     if((hi - lo) <= span * 1.6){
-      mlines.push({name:name, yAxis:val, lineStyle:{color:color,opacity:.75},
-                   label:{position:pos}});
+      mlines.push({name:name, yAxis:val, lineStyle:{color:color,opacity:.7}, label:{position:pos}});
       dLo = lo; dHi = hi;
     }else{
       offnote.push(name+' '+nf(val,2)+'（超出畫面範圍）');
     }
   }
-  wantLine('60日壓力', t.resistance, C.up, 'insideEndTop');
-  wantLine('60日支撐', t.support, C.s1, 'insideEndBottom');
-  wantLine('20日成交均價', t.vwap20, '#b4a0e8', 'insideStartTop');
-  /* 費波南希回撤：波段取自目前顯示的視窗，所以各價位一定落在畫面內。
-     38.2%～61.8% 之間另外鋪一層淡色帶，方便一眼看出價格在不在常被討論的回撤區。 */
-  var fib = P.fibonacci, fibArea = [], fibLines = [];
-  if(showFib && fib && fib.available){
+  if(K1.sr){
+    wantLine('60日壓力', t.resistance, C.up, 'insideEndTop');
+    wantLine('60日支撐', t.support, C.s1, 'insideEndBottom');
+    wantLine('20日成交均價', t.vwap20, '#b4a0e8', 'insideStartTop');
+  }
+  /* 費波南希：波段取自目前的區間，各價位一定在畫面內；38.2%～61.8% 鋪淡色帶 */
+  var fib = v.fib, areas = [], fibLines = [];
+  if(K1.fib && fib && fib.available){
     fib.levels.forEach(function(lv){
       var edge = lv.ratio===0 || lv.ratio===1;
       var item={name:lv.label, yAxis:lv.price, fibRatio:lv.ratio,
@@ -216,16 +319,15 @@ function card01(){
       mlines.push(item); fibLines.push(item);
     });
     var z1=fib.levels.filter(function(lv){return lv.ratio===0.382;})[0], z2=fib.levels.filter(function(lv){return lv.ratio===0.618;})[0];
-    if(z1&&z2) fibArea=[[{yAxis:z1.price},{yAxis:z2.price}]];
+    if(z1&&z2) areas.push([{yAxis:z1.price,fib:true,itemStyle:{color:'rgba(79,209,197,.07)'}},{yAxis:z2.price}]);
   }
   var fi=el('fib-info');
   if(fi){
-    fi.hidden=!showFib;
+    fi.hidden=!K1.fib;
     fi.removeAttribute('title');
     if(!fib || !fib.available){
       fi.textContent='費波南希回撤：'+((fib&&fib.reason)||'資料不足');
     }else{
-      // 線擠在一起時圖上不一定每條都標字，完整價位放在滑鼠提示裡
       fi.title=fib.levels.map(function(lv){return lv.label+'：'+nf(lv.price);}).join('　');
       var upw=fib.direction==='up', a=upw?fib.low:fib.high, z=upw?fib.high:fib.low;
       var where=fib.at?('正好在 '+fib.at.label+'（'+nf(fib.at.price)+'）附近')
@@ -237,10 +339,10 @@ function card01(){
                :'收盤 '+nf(fib.close)+' 已'+(upw?'回撤 ':'反彈 ')+nf(fib.retraced_pct,1)+'%')+' ｜ '+where;
     }
   }
-  /* 除權息日：畫一條垂直虛線。技術指標用的是未還原股價，除權息當天的缺口會直接反映在均線與 KD 上。 */
+  /* 除權息日：垂直虛線（價格未還原，當天的缺口會反映在均線與 KD 上） */
   var divs = (P.dividends && P.dividends.recent) || [];
   divs.forEach(function(ev){
-    if(!ev.in_view) return;
+    if(s.date.indexOf(ev.date)<0) return;
     mlines.push({name:ev.kind+(ev.amount!==null&&ev.amount!==undefined?' '+nf(ev.amount,2):''), xAxis:ev.date,
                  lineStyle:{color:C.warn,type:'dotted',opacity:.9}, label:{position:'insideEndTop',color:C.warn}});
   });
@@ -252,19 +354,19 @@ function card01(){
     offnote.push(P.dividends&&P.dividends.status==='partial'?'除權息資料未完整更新，標記可能不齊全':'除權息資料未取得，不能確認是否有事件');
   }
   var b=P.bollinger;
-  el('bb-info').hidden=!showBB;
-  el('bb-info').textContent=b?'上 '+nf(b.upper)+' · 中 '+nf(b.mid)+' · 下 '+nf(b.lower)+
+  el('bb-info').hidden=!K1.bb;
+  el('bb-info').textContent=b?'布林通道 上 '+nf(b.upper)+' · 中 '+nf(b.mid)+' · 下 '+nf(b.lower)+
     ' ｜ %B '+nf(b.percent_b,3)+' · 寬度 '+nf(b.width)+'% · 寬度百分位 '+nf(b.width_rank,1)+
     (b.squeeze===true?' · 收斂':b.squeeze===null?' · 收斂判斷需139日歷史':'')+
     (b.break_up?' · 今日突破上軌':b.break_down?' · 今日跌破下軌':''):'布林資料不足';
   var bands=[];
-  if(showBB && s.bb_upper){
+  if(K1.bb && s.bb_upper){
     var polygons=[];
-    for(var bi=1;bi<s.date.length;bi++){
-      if(s.bb_upper[bi-1]!==null && s.bb_upper[bi]!==null)
+    for(var bi=1;bi<R;bi++){
+      if(s.bb_upper[bi-1]!==null && s.bb_upper[bi]!==null && s.bb_upper[bi-1]!==undefined && s.bb_upper[bi]!==undefined)
         polygons.push([bi-1,s.bb_lower[bi-1],s.bb_upper[bi-1],bi,s.bb_lower[bi],s.bb_upper[bi]]);
     }
-    bands.push({name:'通道填色',type:'custom',silent:true,z:0,tooltip:{show:false},
+    bands.push({name:'通道填色',type:'custom',silent:true,z:0,tooltip:{show:false},xAxisIndex:0,yAxisIndex:0,
       data:polygons,encode:{x:[0,3],y:[1,2,4,5]},renderItem:function(params,api){
         var points=[api.coord([api.value(0),api.value(1)]),api.coord([api.value(0),api.value(2)]),
                     api.coord([api.value(3),api.value(5)]),api.coord([api.value(3),api.value(4)])];
@@ -272,45 +374,158 @@ function card01(){
       }});
     bands.push(line('布林上軌',s.bb_upper,C.s1,1.2),line('布林中軌',s.bb_mid,'#d9c88f',1),line('布林下軌',s.bb_lower,C.s1,1.2));
   }
+
+  /* ---- 型態：索引換算成目前區間 ---- */
+  var evAt={}, inView={};
+  if(pat){
+    pat.events.forEach(function(e){
+      var j=e.i-v.off; if(j<0||j>=R) return;
+      (evAt[j]=evAt[j]||[]).push(e); inView[e.key]=(inView[e.key]||0)+1;
+    });
+  }
+  var marks=[], markFont=11*fontScale;
+  Object.keys(evAt).forEach(function(key){
+    var j=Number(key), above=0, below=0;
+    evAt[j].forEach(function(e){
+      var d=DEF[e.key]; if(!d||!patShown(e.key)||/^(gap_|hs_)/.test(e.key)) return;
+      var bear=d.dir==='bear', k=bear?above++:below++;
+      marks.push({value:[j, bear?s.high[j]:s.low[j]], pat:e.key,
+        label:{show:true,position:bear?'top':'bottom',distance:3+k*(markFont+3),formatter:dirGlyph(d.dir)+d.short,
+               color:dirColor(d.dir),fontSize:markFont,fontWeight:'bold',textBorderColor:'rgba(10,13,20,.9)',textBorderWidth:2}});
+    });
+  });
+  var gapData=[];
+  if(pat) pat.gaps.forEach(function(g){
+    if(!patShown(g.dir==='up'?'gap_up':'gap_down')) return;
+    var a0=Math.max(0,g.i-1-v.off), a1=Math.min(R-1,g.end-v.off);
+    if(a1<0||a0>=R||a1<a0) return;
+    gapData.push([a0,a1,g.lo,g.hi,g.dir==='up'?1:-1,g.filled?1:0,g.i-1-v.off<0?1:0]);   /* 最後一欄：區間之前就出現的舊缺口，畫淡一點 */
+  });
+  var hsItems=[];
+  if(pat) pat.hs.forEach(function(x){
+    if(!patShown(x.key)) return;
+    var pts=x.points.map(function(p){return [p[0]-v.off,p[1]];});
+    if(pts[0][0]<0) return;
+    hsItems.push({x:x, pts:pts, neck:x.neck.map(function(p){return [p[0]-v.off,p[1]];})});
+  });
+  if(marks.length||hsItems.length){
+    /* 標記與頭肩標籤需要空間：頭肩底的標籤放在頭部下方、頭肩頂放在上方，那一側多留一點 */
+    var rg=dHi-dLo, hb=hsItems.some(function(it){return it.x.key==='hs_bottom';}), ht=hsItems.some(function(it){return it.x.key==='hs_top';});
+    dLo-=rg*(hb?0.2:0.05); dHi+=rg*(ht?0.2:0.05);
+  }
+
   var pad = (dHi - dLo) * 0.04;
-  /* 刻度取「好看的整數間距」並讓上下界落在刻度上：
-     高價股（如 2330）原本會印出一排重複的 2.5k/2.4k，低價股則小數位不足。 */
   function niceStep(range, target){
     var raw = (range || 1) / target, mag = Math.pow(10, Math.floor(Math.log10(raw))), n = raw / mag;
     return (n < 1.5 ? 1 : n < 3 ? 2 : n < 7 ? 5 : 10) * mag;
   }
-  var yStep = niceStep((dHi + pad) - (dLo - pad), 6);
+  var node=el('k1'), W=node.clientWidth||900, Hh=node.clientHeight||480;
+  k1Width=node.clientWidth||0;
+  var yStep = niceStep((dHi + pad) - (dLo - pad), Hh>420?8:6);
   var yMin = Math.floor((dLo - pad) / yStep) * yStep, yMax = Math.ceil((dHi + pad) / yStep) * yStep;
   var yDigits = yStep >= 1 ? 0 : yStep >= 0.1 ? 1 : 2;
-  var vMaxRaw = Math.max.apply(null, s.vol.filter(function(v){return v!==null;}).concat([1]));
+  var yFmt=function(x){return x.toLocaleString('zh-TW',{minimumFractionDigits:yDigits,maximumFractionDigits:yDigits});};
+  var vMaxRaw = Math.max.apply(null, s.vol.filter(function(x){return x!==null;}).concat([1]));
   var vStep = niceStep(vMaxRaw, 2), vMax = Math.ceil(vMaxRaw / vStep) * vStep;
-  function volLabel(v){ return v>=10000 ? (v/10000).toFixed(v%10000?1:0)+'萬' : v.toLocaleString('zh-TW'); }
-  /* 波段窄、Y 軸又被布林下軌或 60 日支撐撐開時，七條線會擠在一起。
-     標籤只留「彼此不重疊」的：依 61.8 → 38.2 → 50 → 23.6 → 78.6 → 0 → 100 的順序放，放不下就只畫線不標字
-     （完整價位在圖下方的讀數列與原始資料頁尾都看得到）。20 日成交均價的標籤也在左側，一併避開。 */
+  function volLabel(x){ return x>=10000 ? (x/10000).toFixed(x%10000?1:0)+'萬' : x.toLocaleString('zh-TW'); }
+  /* 費波南希標籤只留彼此不重疊的（完整價位在讀數列與滑鼠提示） */
   if(fibLines.length){
-    var plotPx = Math.max(120, (el('k1').clientHeight||300) * 0.56);
+    var plotPx = Math.max(120, Hh * 0.6);
     var gap = (yMax - yMin) * 13 * fontScale / plotPx, taken = [];
     mlines.forEach(function(m){ if(m.name==='20日成交均價') taken.push(m.yAxis + gap/2); });
     [0.618,0.382,0.5,0.236,0.786,0,1].forEach(function(r){
       var m = fibLines.filter(function(x){return x.fibRatio===r;})[0]; if(!m) return;
       var center = m.yAxis - gap/2;
-      if(taken.every(function(t){return Math.abs(t-center) >= gap;})){ m.label.show = true; taken.push(center); }
+      if(taken.every(function(tk){return Math.abs(tk-center) >= gap;})){ m.label.show = true; taken.push(center); }
     });
   }
+  /* 收盤價標籤 */
+  var lastClose=s.close[R-1];
+  mlines.push({name:'收盤',yAxis:lastClose,lineStyle:{color:'#9aa3b8',type:'dotted',opacity:.7,width:1},
+    label:{show:true,position:'end',formatter:nf(lastClose),color:'#fff',backgroundColor:'#3a4356',padding:[2,5],borderRadius:3,fontSize:11}});
+
+  /* ---- 版面：左邊價格刻度、右邊籌碼成本分佈 ---- */
+  var narrow=W<640;
+  var vpW=K1.vp ? (narrow ? Math.round(W*0.24) : Math.round(Math.min(280,Math.max(150,W*0.2)))) : 0;
+  var labChars=Math.max(yFmt(yMin).length,yFmt(yMax).length);
+  var leftW=Math.round(Math.max(labChars*6.8,40)*fontScale)+12;
+  var rightW=vpW ? vpW+(narrow?30:44) : 44;
+  var gTop=28, gH='63%';
+  var bins=Math.round(Math.max(22,Math.min(48,Hh*0.6/9)));
+  var vp=K1.vp ? volumeProfile(s,0,R-1,bins) : null;
+  var vparts=vpSeriesParts(vp);
   var n1 = el('n1');
   if(n1){ n1.textContent = offnote.join('　·　'); n1.style.display = offnote.length ? '' : 'none'; }
 
-  mk('k1', Object.assign(base(),{
-    legend:{type:'scroll',data:['日K','MA5','MA10','MA20','MA60'].concat(showBB?['布林上軌','布林中軌','布林下軌']:[]),top:0,left:0,right:0,itemWidth:14,itemHeight:2,
+  var series=bands.concat([
+    {id:'k',name:'日K',type:'candlestick',data:kd,xAxisIndex:0,yAxisIndex:0,z:4,barMaxWidth:14,
+     itemStyle:{color:alpha(C.up,.38),color0:C.down,borderColor:C.up,borderColor0:C.down,borderWidth:1.1},
+     markLine:{symbol:'none',silent:true,label:{fontSize:10,color:C.ink2,backgroundColor:'rgba(21,26,36,.86)',padding:[1,4],borderRadius:3,
+                formatter:function(p){return (p.data&&p.data.xAxis!==undefined)?p.name:p.name+' '+nf(p.value);}},
+       lineStyle:{type:'dashed',width:1}, data:mlines.concat(vparts.candleLine)},
+     markArea:{silent:true,data:areas.concat(vparts.candleArea)}},
+    line('MA5',s.ma5,MAC[0],1.5), line('MA10',s.ma10,MAC[1],1.3),
+    line('MA20',s.ma20,MAC[2],1.7), line('MA60',s.ma60,MAC[3],1.7),
+    {name:'量',type:'bar',data:vols,xAxisIndex:1,yAxisIndex:1,barWidth:'62%',barMaxWidth:14}
+  ]);
+  if(gapData.length) series.push({id:'gaps',name:'跳空缺口',type:'custom',silent:true,z:1,xAxisIndex:0,yAxisIndex:0,tooltip:{show:false},
+    data:gapData,encode:{x:[0,1],y:[2,3]},renderItem:function(params,api){
+      var up=api.value(4)>0, bw=api.size([1,0])[0];
+      var p0=api.coord([api.value(0),api.value(3)]), p1=api.coord([api.value(1),api.value(2)]);
+      var shape=echarts.graphic.clipRectByRect({x:p0[0]-bw/2,y:p0[1],width:p1[0]-p0[0]+bw,height:Math.max(1.5,p1[1]-p0[1])},params.coordSys);
+      if(!shape) return null;
+      var old=api.value(6)>0;
+      return {type:'rect',shape:shape,style:{fill:alpha(up?C.up:C.down,old?0.04:api.value(5)?0.08:0.16),stroke:alpha(up?C.up:C.down,old?.35:.75),lineWidth:1,lineDash:[4,3]}};
+    }});
+  if(hsItems.length) series.push({id:'hs',name:'頭肩型態',type:'custom',silent:true,z:5,xAxisIndex:0,yAxisIndex:0,tooltip:{show:false},clip:true,
+    data:hsItems.map(function(it){return it.pts[2];}),encode:{x:0,y:1},renderItem:function(params,api){
+      var it=hsItems[params.dataIndex]; if(!it) return null;
+      var top=it.x.key==='hs_top', col=top?C.down:C.up, f=Math.round(12*fontScale);
+      var P2=it.pts.map(function(p){return api.coord(p);}), n0=api.coord(it.neck[0]), n9=api.coord(it.neck[1]);
+      var cs=params.coordSys, cy=function(y){return Math.max(cs.y+12,Math.min(cs.y+cs.height-12,y));};
+      var dy=top?-1:1, kids=[
+        {type:'polyline',shape:{points:P2},style:{stroke:col,lineWidth:1.3,lineDash:[2,3],fill:null}},
+        {type:'line',shape:{x1:n0[0],y1:n0[1],x2:n9[0],y2:n9[1]},style:{stroke:C.warn,lineWidth:1.5,lineDash:[7,4]}}];
+      [[0,'左肩'],[2,'頭'],[4,'右肩']].forEach(function(q){
+        var p=P2[q[0]];
+        kids.push({type:'text',x:p[0],y:cy(p[1]+dy*(8+markFont)),style:{text:q[1],fill:col,font:'bold '+f+'px sans-serif',align:'center',verticalAlign:'middle',
+          stroke:'rgba(10,13,20,.9)',lineWidth:3}});
+      });
+      var hp=P2[2];
+      var by=hp[1]+dy*(22+markFont*1.6);
+      kids.push({type:'text',x:hp[0],y:Math.max(cs.y+11,Math.min(cs.y+cs.height-11,by)),style:{text:(top?'頭肩頂':'頭肩底')+(it.x.confirmed?'✓':'?'),fill:'#fff',
+        backgroundColor:alpha(col,.92),padding:[3,8],borderRadius:4,font:'bold '+f+'px sans-serif',align:'center',verticalAlign:'middle'}});
+      return {type:'group',children:kids};
+    }});
+  if(marks.length) series.push({id:'marks',name:'型態標註',type:'scatter',data:marks,symbolSize:1,itemStyle:{color:'transparent'},
+    z:6,silent:true,xAxisIndex:0,yAxisIndex:0,tooltip:{show:false}});
+  if(vp) series.push({id:'vp',name:'籌碼成本分佈',type:'custom',silent:true,xAxisIndex:2,yAxisIndex:2,tooltip:{show:false},
+    data:vparts.data,encode:{x:[2,3],y:[0,1]},renderItem:function(params,api){
+      var lo=api.value(0), hi=api.value(1), u=api.value(2), d=api.value(3), isPoc=api.value(4)>0, inVa=api.value(5)>0;
+      var p0=api.coord([0,hi]), p1=api.coord([u,lo]), p2=api.coord([u+d,lo]);
+      var h=Math.max(1,p1[1]-p0[1]-1);
+      var au=isPoc?.95:inVa?.62:.34, ad=isPoc?.95:inVa?.6:.32;
+      return {type:'group',children:[
+        {type:'rect',shape:{x:p0[0],y:p0[1],width:Math.max(0,p1[0]-p0[0]),height:h},style:{fill:alpha(C.up,au)}},
+        {type:'rect',shape:{x:p1[0],y:p0[1],width:Math.max(0,p2[0]-p1[0]),height:h},style:{fill:alpha(C.down,ad)}}]};
+    },
+    markLine:{symbol:'none',silent:true,data:vparts.line},markArea:{silent:true,data:vparts.area}});
+
+  var legendNames=['MA5','MA10','MA20','MA60'].concat(K1.bb?['布林上軌','布林中軌','布林下軌']:[]);
+  var selected=Object.assign({MA10:false},K1.legend||{});
+  var chart=mk('k1', Object.assign(base(),{
+    legend:{type:'scroll',data:legendNames,selected:selected,top:0,left:leftW-4,right:rightW,itemWidth:14,itemHeight:2,
             itemGap:12,textStyle:{color:C.ink2,fontSize:11},inactiveColor:'#555b68'},
-    grid:[{left:22,right:58,top:26,height:'58%',containLabel:true},
-          {left:22,right:58,top:'72%',bottom:24,containLabel:true}],
-    axisPointer:{link:[{xAxisIndex:'all'}],label:{backgroundColor:'#2a3243'}},
+    graphic:vp?[{type:'text',right:10,top:4,silent:true,style:{text:narrow?'籌碼分佈':'籌碼成本分佈（價值區 70%）',fill:C.ink2,font:'600 12px sans-serif'}}]:[],
+    grid:[{left:leftW,right:rightW,top:gTop,height:gH},
+          {left:leftW,right:rightW,top:'72%',bottom:24},
+          {right:8,width:Math.max(40,vpW-8),top:gTop,height:gH}],
+    axisPointer:{link:[{xAxisIndex:[0,1]}],label:{backgroundColor:'#2a3243'}},
     tooltip:Object.assign(base().tooltip,{trigger:'axis',axisPointer:{type:'cross'},
       formatter:function(ps){
         if(!ps.length) return '';
-        var i=ps[0].dataIndex, o='<b>'+s.date[i]+'</b><br>';
+        var i=s.date.indexOf(ps[0].axisValue); if(i<0) return '';
+        var o='<b>'+s.date[i]+'</b><br>';
         var ch=s.close[i]-(i>0?s.close[i-1]:s.close[i]);
         o+='開 '+nf(s.open[i])+'　高 '+nf(s.high[i])+'<br>低 '+nf(s.low[i])+'　收 <b>'+nf(s.close[i])+'</b>'+
            ' <span style="color:'+(ch>=0?C.up:C.down)+'">'+arrow(ch)+sg(ch)+'</span><br>';
@@ -318,32 +533,165 @@ function card01(){
         ['ma5','ma10','ma20','ma60'].forEach(function(k,j){
           if(s[k][i]!=null) o+='<br>MA'+[5,10,20,60][j]+' '+nf(s[k][i]);
         });
-        if(showBB&&s.bb_upper) o+='<br>布林上 / 中 / 下 '+nf(s.bb_upper[i])+' / '+nf(s.bb_mid[i])+' / '+nf(s.bb_lower[i])+'<br>%B '+nf(s.bb_percent_b[i],3)+' · 寬度 '+nf(s.bb_width[i])+'%';
+        if(K1.bb&&s.bb_upper&&s.bb_upper[i]!=null) o+='<br>布林上 / 中 / 下 '+nf(s.bb_upper[i])+' / '+nf(s.bb_mid[i])+' / '+nf(s.bb_lower[i])+'<br>%B '+nf(s.bb_percent_b[i],3)+' · 寬度 '+nf(s.bb_width[i])+'%';
+        (evAt[i]||[]).forEach(function(e){
+          var d=DEF[e.key]; if(!d||!patShown(e.key)) return;
+          var st=pat.stats[e.key]||{};
+          o+='<div style="margin-top:6px;padding-top:5px;border-top:1px solid rgba(255,255,255,.14)"><b style="color:'+dirColor(d.dir)+'">'+dirGlyph(d.dir)+' '+esc(d.name)+'</b>';
+          if(/^gap_/.test(e.key)){
+            var g=pat.gaps.filter(function(x){return x.i-v.off===i;})[0];
+            if(g) o+='　缺口 '+nf(g.lo)+'～'+nf(g.hi)+'（'+(g.filled?g.fill_date.slice(5)+' 已回補':'尚未回補')+'）';
+          }
+          if(/^hs_/.test(e.key)) o+='　收盤'+(e.key==='hs_top'?'跌破':'突破')+'頸線 ✓';
+          o+='<br>'+statLine(st,5)+'<br>'+statLine(st,10);
+          o+='<br>這一次之後 5 日：'+(e.f5===null||e.f5===undefined?'還不到 5 個交易日':'<span style="color:'+(e.f5>=0?C.up:C.down)+'">'+sg(e.f5)+'%</span>')+'</div>';
+        });
+        if(evAt[i]&&evAt[i].some(function(e){return patShown(e.key);})&&pat.baseline&&pat.baseline.n5)
+          o+='<div style="opacity:.75;margin-top:3px">對照：全部交易日 5 日上漲 '+nf(pat.baseline.up5,0)+'%、平均 '+sg(pat.baseline.avg5)+'%</div>';
         return o;
       }}),
     xAxis:[ax({type:'category',data:s.date,gridIndex:0,boundaryGap:true,splitLine:{show:false},
                axisLabel:{show:false},axisPointer:{label:{show:true}}}),
            ax({type:'category',data:s.date,gridIndex:1,boundaryGap:true,splitLine:{show:false},
-               axisLabel:{color:C.muted,fontSize:10,interval:Math.ceil(s.date.length/7),
-                          formatter:function(v){return v.slice(5);}}})],
-    yAxis:[ax({min:yMin,max:yMax,interval:yStep,gridIndex:0,position:'right',axisLabel:{color:C.muted,fontSize:10,
-               formatter:function(v){return v.toLocaleString('zh-TW',{minimumFractionDigits:yDigits,maximumFractionDigits:yDigits});}}}),
-           ax({min:0,max:vMax,interval:vStep,gridIndex:1,position:'right',splitLine:{show:false},
-               axisLabel:{color:C.muted,fontSize:9,showMinLabel:false,formatter:volLabel}})],
+               axisLabel:{color:C.muted,fontSize:10,interval:Math.max(0,Math.ceil(R/(narrow?4:8))-1),
+                          formatter:function(x){return R>250?x.slice(2,7).replace('-','/'):x.slice(2).replace(/-/g,'/');}}}),
+           {type:'value',gridIndex:2,min:0,max:vparts.xmax,show:false}],
+    yAxis:[ax({min:yMin,max:yMax,interval:yStep,gridIndex:0,position:'left',axisLabel:{color:C.muted,fontSize:10,formatter:yFmt}}),
+           ax({min:0,max:vMax,interval:vStep,gridIndex:1,position:'left',splitLine:{show:false},
+               axisLabel:{color:C.muted,fontSize:9,showMinLabel:false,formatter:volLabel}}),
+           {type:'value',gridIndex:2,min:yMin,max:yMax,show:false}],
     dataZoom:[{type:'inside',xAxisIndex:[0,1],start:0,end:100},
               {type:'inside',yAxisIndex:[0],zoomOnMouseWheel:false,moveOnMouseWheel:false}],
-    series:bands.concat([
-      {name:'日K',type:'candlestick',data:kd,xAxisIndex:0,yAxisIndex:0,z:4,
-       itemStyle:{color:'transparent',color0:C.down,borderColor:C.up,borderColor0:C.down,borderWidth:1.3},
-       markLine:{symbol:'none',silent:true,label:{fontSize:10,color:C.ink2,backgroundColor:'rgba(21,26,36,.86)',padding:[1,4],borderRadius:3,
-                  formatter:function(p){return (p.data&&p.data.xAxis!==undefined)?p.name:p.name+' '+nf(p.value);}},
-         lineStyle:{type:'dashed',width:1}, data:mlines},
-       markArea:{silent:true,itemStyle:{color:'rgba(79,209,197,.07)'},data:fibArea}},
-      line('MA5',s.ma5,'#e8b4d0'), line('MA10',s.ma10,'#7fd0a8'),
-      line('MA20',s.ma20,C.up,1.8), line('MA60',s.ma60,'#9c9cac'),
-      {name:'量',type:'bar',data:vols,xAxisIndex:1,yAxisIndex:1,barWidth:'62%'}
-    ])
+    series:series
   }));
+  if(chart){
+    chart.on('legendselectchanged',function(e){ K1.legend=e.selected; saveK1(); });
+    /* 縮放 K 棒時，籌碼分佈跟著可見區間重算 */
+    var pending=null;
+    if(vp) chart.on('datazoom',function(){
+      if(pending) return;
+      pending=requestAnimationFrame(function(){
+        pending=null;
+        var z=chart.getOption().dataZoom[0], a=Math.max(0,Math.round(z.startValue||0)), bb=Math.min(R-1,Math.round(z.endValue===undefined?R-1:z.endValue));
+        var p=vpSeriesParts(volumeProfile(s,a,Math.max(a,bb),bins));
+        chart.setOption({xAxis:[{},{},{max:p.xmax}],series:[{id:'k',markLine:{data:mlines.concat(p.candleLine)},markArea:{data:areas.concat(p.candleArea)}},
+          {id:'vp',data:p.data,markLine:{data:p.line},markArea:{data:p.area}}]});
+      });
+    });
+  }
+  k1Summary(v, vp, evAt, inView, DEF);
+  k1Legend(inView, DEF, v);
+}
+
+/* 圖下方的白話摘要 */
+var lastK=null;
+function k1Summary(v, vp, evAt, inView, DEF){
+  var s=v.s, R=s.date.length, pat=P.patterns, parts=[];
+  var cnt={bull:0,bear:0,neutral:0}, lastE=null;
+  Object.keys(evAt).forEach(function(j){ evAt[j].forEach(function(e){ var d=DEF[e.key]; if(!d||!patShown(e.key)) return; cnt[d.dir]++; if(!lastE||e.i>lastE.i) lastE=e; }); });
+  lastK={r:R, pat:K1.pat&&!!pat, vp:vp?{poc:vp.poc,vah:vp.vah,val:vp.val}:null, counts:pat&&K1.pat?cnt:null};
+  var box=el('k-summary'); if(!box) return;
+  if(pat && K1.pat){
+    var t='<b>型態</b>　近 '+R+' 日：<span class="up">▲多方 '+cnt.bull+'</span>、<span class="down">▼空方 '+cnt.bear+'</span>、<span class="warn">◆中性 '+cnt.neutral+'</span>';
+    if(lastE){ var d=DEF[lastE.key], st=pat.stats[lastE.key]||{};
+      t+='　·　最近一次：'+s.date[lastE.i-v.off].slice(5)+' <b style="color:'+dirColor(d.dir)+'">'+esc(d.name)+'</b>（'+(st.n5?'歷史 5 日上漲 '+nf(st.up5,0)+'%，n='+st.n5:'歷史樣本不足')+'）'; }
+    var hs=pat.hs.filter(function(x){return patShown(x.key)&&x.points[0][0]-v.off>=0;});
+    hs.forEach(function(x){
+      var nk=x.neck[1][1];
+      t+='　·　<b style="color:'+(x.key==='hs_top'?C.down:C.up)+'">'+(x.key==='hs_top'?'頭肩頂':'頭肩底')+(x.confirmed?' ✓':' ?')+'</b> '+
+        (x.confirmed?s.date[x['break']-v.off].slice(5)+' 收盤'+(x.key==='hs_top'?'跌破':'突破')+'頸線':'形成中，頸線約 '+nf(nk));
+    });
+    /* 只列這個區間內出現、到今天還沒回補的缺口（更早的舊缺口通常離現價很遠） */
+    var open=pat.gaps.filter(function(g){return !g.filled&&patShown(g.dir==='up'?'gap_up':'gap_down')&&g.i-v.off>=0;});
+    if(open.length){ var g=open[open.length-1];
+      t+='　·　區間內尚未回補的缺口 '+open.length+' 個（最近 '+s.date[g.i-v.off].slice(5)+' '+(g.dir==='up'?'向上':'向下')+' '+nf(g.lo)+'～'+nf(g.hi)+'）'; }
+    parts.push(t);
+  }
+  if(vp){
+    var c=s.close[R-1], where=c>vp.vah?'在價值區上方（已站上壓力帶 VAH）':c<vp.val?'在價值區下方（跌破支撐帶 VAL）':'在價值區內';
+    parts.push('<b>籌碼成本分佈</b>　POC <span class="warn">'+nf(vp.poc)+'</span> · 價值區 '+nf(vp.val)+'～'+nf(vp.vah)+'；收盤 '+nf(c)+' '+where+
+      '　<span class="k-muted">（用每日最高～最低價平均攤成交量估計，縮放 K 棒時會跟著可見區間重算）</span>');
+  }
+  box.innerHTML=parts.map(function(x){return '<div>'+x+'</div>';}).join('');
+  box.hidden=!parts.length;
+}
+
+/* 符號說明與歷史勝率表 */
+function k1Legend(inView, DEF, v){
+  var body=el('k-legend-body'); if(!body) return;
+  var pat=P.patterns;
+  if(!pat){ body.innerHTML='<p class="k-muted">這份報告沒有型態資料，請重新分析。</p>'; return; }
+  var span=spanLabel(), base=pat.baseline||{};
+  function pct(x){ return x===null||x===undefined?'—':nf(x,0)+'%'; }
+  function avg(x){ return x===null||x===undefined?'—':'<span class="'+cls(x)+'">'+sg(x)+'%</span>'; }
+  var rows=pat.defs.map(function(d){
+    var st=pat.stats[d.key]||{}, few=(st.n5||0)<20;
+    var sym=/^gap_/.test(d.key)?(d.dir==='up'||d.dir==='bull'?'紅色虛線框':'綠色虛線框'):/^hs_/.test(d.key)?d.name+' ✓／? ＋黃色虛線':dirGlyph(d.dir)+d.short;
+    return '<tr'+(few?' class="k-few"':'')+'><td><span style="color:'+dirColor(d.dir)+'">'+esc(sym)+'</span></td><td>'+esc(d.name)+'<small>'+esc(d.rule)+'</small></td>'+
+      '<td>'+(d.dir==='bull'?'<span class="up">看漲</span>':d.dir==='bear'?'<span class="down">看跌</span>':'<span class="warn">中性</span>')+'</td>'+
+      '<td>'+(inView[d.key]||0)+'</td><td>'+(st.total||0)+'</td><td>'+pct(st.up5)+'</td><td>'+avg(st.avg5)+'</td><td>'+pct(st.up10)+'</td><td>'+avg(st.avg10)+'</td></tr>';
+  }).join('');
+  body.innerHTML='<div class="scroll"><table class="raw k-legend-table"><thead><tr><th>符號</th><th>名稱與判斷規則</th><th>多空</th><th>本區間</th><th>'+esc(span)+'次數</th>'+
+    '<th>5 日上漲機率</th><th>5 日平均</th><th>10 日上漲機率</th><th>10 日平均</th></tr></thead><tbody>'+rows+
+    '<tr class="k-base"><td>—</td><td>全部交易日（對照基準）</td><td>—</td><td>'+v.r+'</td><td>'+(base.total||0)+'</td><td>'+pct(base.up5)+'</td><td>'+avg(base.avg5)+'</td><td>'+pct(base.up10)+'</td><td>'+avg(base.avg10)+'</td></tr>'+
+    '<tr><td><span class="warn">黃色虛線橫貫</span></td><td>POC 最大量價位（籌碼最密集的價格）</td><td>—</td><td colspan="6" class="k-muted">右側籌碼成本分佈：紅＝收紅K那幾天的量、綠＝收黑K的量</td></tr>'+
+    '<tr><td><span style="color:#8fb0ff">淺藍色帶</span></td><td>價值區（涵蓋 70% 成交量；上緣 VAH 壓力、下緣 VAL 支撐）</td><td>—</td><td colspan="6" class="k-muted">收盤站上 VAH 常被視為突破密集區，跌破 VAL 則相反；只是描述，不是訊號</td></tr>'+
+    '</tbody></table></div>'+
+    '<p class="k-muted">統計期間 '+esc(pat.span.from)+' ～ '+esc(pat.span.to)+'（'+pat.span.bars+' 個交易日）。「上漲機率」＝型態出現那天收盤之後第 5／10 個交易日收盤較高的比例，「平均」是同期間報酬的平均；'+
+    '頭肩型態以收盤突破／跌破頸線那天計。只用這一檔股票自己的歷史、未還原股價、不含交易成本；相鄰事件重疊、樣本少於 20 次的列以淡色顯示，都只能當參考，不代表之後會如此。</p>';
+}
+
+function buildK1Controls(){
+  var sel=el('k-range');
+  if(sel){
+    var opts=kRanges(), W=kWindow(), cur=kRange(), n=P.kline?P.kline.date.length:opts[opts.length-1];
+    sel.innerHTML=opts.map(function(r){
+      var lab=r===W?(KSTD.indexOf(r)>=0?'近 '+r+' 日（分析天數）':'分析天數 '+r+' 日'):(KSTD.indexOf(r)<0&&r===n?'全部 '+r+' 日':'近 '+r+' 日');
+      return '<option value="'+(r===W?0:r)+'"'+(r===cur?' selected':'')+'>'+lab+'</option>';
+    }).join('');
+  }
+  var box=el('k-pats');
+  if(box){
+    var defs=(P.patterns&&P.patterns.defs)||[];
+    if(!defs.length){ box.innerHTML=''; box.hidden=true; }
+    else{
+      var off=defs.filter(function(d){return K1.off[d.key];}).length;
+      box.innerHTML='<button type="button" class="kp-more" aria-expanded="'+box.classList.contains('open')+'">選擇要標示的型態（'+(defs.length-off)+' / '+defs.length+'）</button>'+defs.map(function(d){
+        return '<label class="kp" data-dir="'+d.dir+'" title="'+esc(d.rule)+'"><input type="checkbox" data-kpat="'+d.key+'"'+(K1.off[d.key]?'':' checked')+'>'+esc(d.name)+'</label>';
+      }).join('')+'<span class="kp-actions"><button type="button" class="kp-all" data-kpat-all="1">全選</button><button type="button" class="kp-all" data-kpat-all="0">全不選</button></span>';
+      box.hidden=!K1.pat;
+    }
+  }
+  [['btn-vp','vp'],['btn-pat','pat'],['btn-sr','sr'],['btn-bb','bb'],['btn-fib','fib']].forEach(function(x){
+    var b=el(x[0]); if(b) b.setAttribute('aria-pressed',String(!!K1[x[1]]));
+  });
+  var lg=el('k-legend'); if(lg) lg.hidden=!P.patterns;
+}
+function redrawK1(){
+  if(!P) return;
+  var node=el('k1'), ch=node&&echarts.getInstanceByDom(node);
+  if(ch){ charts=charts.filter(function(c){return c!==ch;}); ch.dispose(); }
+  buildK1Controls();
+  if(node && !node.closest('[hidden]')) card01();
+  var b=document.querySelector('[data-chart-png="k1"]'); if(b) b.disabled=!echarts.getInstanceByDom(el('k1'));
+}
+function bindK1(){
+  [['btn-vp','vp'],['btn-pat','pat'],['btn-sr','sr'],['btn-bb','bb'],['btn-fib','fib']].forEach(function(x){
+    var b=el(x[0]); if(!b) return;
+    b.addEventListener('click',function(){ K1[x[1]]=!K1[x[1]]; saveK1(); redrawK1(); });
+  });
+  var sel=el('k-range');
+  if(sel) sel.addEventListener('change',function(){ K1.range=Number(this.value); saveK1(); redrawK1(); });
+  var box=el('k-pats');
+  if(box){
+    box.addEventListener('change',function(e){ var c=e.target.closest('[data-kpat]'); if(!c) return; if(c.checked) delete K1.off[c.dataset.kpat]; else K1.off[c.dataset.kpat]=true; saveK1(); redrawK1(); });
+    box.addEventListener('click',function(e){
+      var m=e.target.closest('.kp-more'); if(m){ var on=!box.classList.contains('open'); box.classList.toggle('open',on); m.setAttribute('aria-expanded',String(on)); return; }
+      var b=e.target.closest('[data-kpat-all]'); if(!b) return;
+      var on=b.dataset.kpatAll==='1'; K1.off={};
+      if(!on) ((P&&P.patterns&&P.patterns.defs)||[]).forEach(function(d){K1.off[d.key]=true;});
+      saveK1(); redrawK1(); });
+  }
 }
 
 /* ========================================================================
@@ -847,6 +1195,7 @@ function drawAll(){
   });
   readColors();
   if(strategyChart){strategyChart.dispose();strategyChart=null;}
+  buildK1Controls();
   card01();card02();card03();card04();card05();card06();card07();card08();
   card09();card10();card11();card12();card13();card14();card15();card16();
   card17();card18();drawDMI();
@@ -1001,9 +1350,7 @@ function bindOnce(){
   if(tb) tb.addEventListener('click',function(){setView(activeView==='raw'?'all':'raw');});
   document.querySelectorAll('.analysis-tabs [data-view]').forEach(function(b){b.addEventListener('click',function(){setView(b.dataset.view);});});
   document.querySelectorAll('[data-chart-png]').forEach(function(b){b.addEventListener('click',function(){saveChart(b.dataset.chartPng);});});
-  el('btn-bb').addEventListener('click',function(){showBB=!showBB;this.setAttribute('aria-pressed',String(showBB));this.textContent='布林通道 20 / 2σ：'+(showBB?'開':'關');if(P) drawAll();});
-  var fb=el('btn-fib');
-  if(fb) fb.addEventListener('click',function(){showFib=!showFib;this.setAttribute('aria-pressed',String(showFib));this.textContent='費波南希回撤：'+(showFib?'開':'關');if(P) drawAll();});
+  bindK1();
   el('btn-main-png').addEventListener('click',function(){saveChart('k1');});
   var tid;
   window.addEventListener('resize',function(){
@@ -1107,6 +1454,7 @@ window.TWBoard = {
   resize: resizeCharts,
   payload: function(){ return P; },            // 名詞解釋用來顯示「目前這一檔」的數值
   macro: function(){ return latestMacroData; },
+  kstate: function(){ return P ? lastK : null; },
   clear: function(){ closeZoom();charts.forEach(function(c){ c.dispose(); }); charts=[]; if(strategyChart){strategyChart.dispose();strategyChart=null;} P=null; }
 };
 })();

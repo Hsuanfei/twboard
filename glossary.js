@@ -3,7 +3,7 @@
  * 本檔案是「台股戰略產生器」的一部分：自由軟體，依 GNU GPL 第 3 版釋出，不附任何擔保，詳見 LICENSE。
  * 匯出的報告另有額外許可，見 LICENSE-EXCEPTION.md。 */
 /* ========================================================================
-   指標名詞解釋（20260924a）
+   指標名詞解釋（20260924a；0928a 加上 K 線型態、籌碼成本分佈與族群輪動圖表）
    畫面右上角的 ⓘ 按鈕打開。互動版與離線匯出的報告共用這一份。
    想修改說明文字，只要改下面 ENTRIES 裡的字串；公式要和 twboard.py／board.js 的實作一致。
    ======================================================================== */
@@ -26,7 +26,7 @@ var PLACES = {
 /* 速查表：每一格對到最主要的一個名詞 */
 /* 速查表：[圖卡, 主要名詞, 小字要列出的名詞（省略時只列主要名詞）] */
 var INDEX = [
-  [1,'ma',['ma','boll','fib','sr','vwap']],[2,'verdict',['verdict','ma-align','rs','bias','atr','plan']],
+  [1,'candle-pattern',['kline-range','candle-pattern','pattern-winrate','volume-profile','value-area','ma','boll','fib','sr']],[2,'verdict',['verdict','ma-align','rs','bias','atr','plan']],
   [3,'radar3',['radar3','overall','trend-score','mom-score']],[4,'heat'],[5,'radar5',['radar5','rsi','atr','bias']],
   [6,'kd'],[7,'macd'],[8,'inst',['inst','inst-sum']],[9,'risk9',['risk9','rsi','kd','pos']],
   [10,'updown'],[11,'gauge11',['gauge11','rsi','kd','tech-score']],[12,'lamp12',['lamp12','ma-align','macd','bias','vol-dir']],
@@ -35,12 +35,12 @@ var INDEX = [
   ['dmi','dmi',['dmi','vol-dir','activity']],['cmp','cmp-cols',['cmp-cols','cmp-status','cmp-filter']],
   ['bt','bt-table'],['sim','bt-sim',['bt-sim','bt-metrics']],['macro','idx',['idx','fx','idx100','macro-chg']],
   ['scan','screen-rules',['screen-rules','scan-score','mk-tags','inst-streak']],['rank','rank-list',['rank-list','liquidity']],
-  ['etf','etf-rank'],['sector','sector-rotation',['sector-rotation','sector-vol','sector-leaders','themes']],
+  ['etf','etf-rank'],['sector','sector-rotation',['sector-rotation','quadrant-change','sector-heat','sector-rank','sector-timeline','sector-accel','themes']],
   ['alert','price-alert'],['paper','paper-trade']
 ];
 var CATS = [
   ['start','先讀這裡'], ['quote','行情與頁首'], ['trend','均線與趨勢'], ['momentum','動能指標'],
-  ['vol','波動、通道與價位'], ['volume','量能與價量分布'], ['chip','法人與信用交易'],
+  ['vol','波動、通道與價位'], ['volume','量能與價量分布'], ['pattern','K 線型態與籌碼分佈'], ['chip','法人與信用交易'],
   ['score','評分與研判'], ['compare','比較表與篩選'], ['bt','回測與交易模擬'],
   ['macro','全球市場與匯率'], ['market','市場掃描與族群'], ['data','資料狀態']
 ];
@@ -114,7 +114,7 @@ var ENTRIES = [
  where:[1,'raw'],
  what:'最近 N 個交易日收盤價的簡單平均。MA5 約一週、MA10 約兩週、MA20 約一個月（月線）、MA60 約一季（季線）。',
  calc:'MA<sub>N</sub>＝最近 N 日收盤價加總 ÷ N',
- read:['收盤在均線之上：今天的價格高於近 N 日平均。','短均線在長均線之上：近期漲得比較多。','主K線圖上的線色：MA5 粉、MA10 綠、MA20 用漲色的較粗線、MA60 灰。'],
+ read:['收盤在均線之上：今天的價格高於近 N 日平均。','短均線在長均線之上：近期漲得比較多。','主K線圖上的線色：MA5 橘黃、MA10 淺綠（預設隱藏，點圖例可開啟）、MA20 紫、MA60 天藍；色盲友善配色時改用黃、青、紫、灰，避開漲跌色。'],
  note:'均線是過去價格的平均，一定落後於價格；盤整時容易頻繁交叉。',
  now:function(P){ var t=P.tech; return 'MA5 '+f(t.ma5)+'、MA10 '+f(t.ma10)+'、MA20 '+f(t.ma20)+'、MA60 '+f(t.ma60)+'；收盤 '+f(P.quote.close); }},
 {id:'ma-align', cat:'trend', term:'均線排列（多頭／空頭／糾結）', en:'MA alignment',
@@ -132,7 +132,7 @@ var ENTRIES = [
 {id:'sr', cat:'trend', term:'60 日支撐／壓力', en:'60-day support · resistance',
  where:[1,2,18],
  calc:['60 日支撐＝近 60 個交易日（含今天）盤中最低價','60 日壓力＝近 60 個交易日盤中最高價'],
- read:['主K線圖畫成水平虛線；分析天數較短時，線可能超出畫面，改在圖下方文字寫出價位（避免把 K 棒壓扁）。','60 日壓力同時是「首目標」。'],
+ read:['主K線圖畫成水平虛線（可用「支撐壓力」開關）；區間較短時，線可能超出畫面，改在圖下方文字寫出價位（避免把 K 棒壓扁）。','60 日壓力同時是「首目標」。'],
  note:'這只是近一季的區間邊界，不是用演算法找出來的支撐區，也不保證價格會在這裡止跌或受壓。',
  now:function(P){ var t=P.tech; return '支撐 '+f(t.support)+'、壓力 '+f(t.resistance)+'；收盤 '+f(P.quote.close); }},
 {id:'pos', cat:'trend', term:'20 日／60 日位階', en:'range position',
@@ -187,7 +187,7 @@ var ENTRIES = [
 {id:'boll', cat:'vol', term:'布林通道（20 日、2σ）', en:'Bollinger Bands',
  where:[1,'raw'],
  calc:['中軌＝20 日收盤平均','上軌／下軌＝中軌 ± 2 × 20 日收盤的母體標準差'],
- read:['主K線圖上的藍色上下軌與淡色帶，黃色線是中軌；可用「布林通道」按鈕開關。','通道變寬代表近期波動放大；價格沿著上軌走常見於強勢行情。'],
+ read:['主K線圖上的藍色上下軌與淡色帶，黃色線是中軌；預設關閉，按「布林通道」開啟（比較表的布林欄位不受影響）。','通道變寬代表近期波動放大；價格沿著上軌走常見於強勢行情。'],
  note:'碰到上軌或下軌本身不是買賣訊號；布林通道沒有加入綜合分。',
  now:function(P){ var b=P.bollinger; return b&&ok(b.upper)?'上軌 '+f(b.upper)+'、中軌 '+f(b.mid)+'、下軌 '+f(b.lower):'布林資料不足'; }},
 {id:'boll-pb', cat:'vol', term:'布林 %B', en:'%B',
@@ -211,10 +211,10 @@ var ENTRIES = [
    return b.break_up?'今日突破上軌':b.break_down?'今日跌破下軌':ok(b.percent_b)&&b.percent_b>1?'收在上軌外':ok(b.percent_b)&&b.percent_b<0?'收在下軌外':'收在通道內'; }},
 {id:'fib', cat:'vol', term:'費波南希回撤', en:'Fibonacci Retracement',
  where:[1],
- what:'把「分析天數」視窗內的最高點與最低點當作一個波段，畫出幾條慣用的回撤比例線。',
+ what:'把主K線圖目前區間（近 60／120／250 日或分析天數）內的最高點與最低點當作一個波段，畫出幾條慣用的回撤比例線。預設關閉，按「費波南希」開啟。',
  calc:['低點在前、高點在後＝上升波段：0% 在高點、100% 在低點，各線＝高點 − 波段幅度 × 比率。','高點在前、低點在後＝下跌波段：0% 在低點、100% 在高點，各線＝低點 ＋ 波段幅度 × 比率。','比率：23.6%、38.2%、50%、61.8%、78.6%（50% 不是費波南希比率，是慣例一起畫的中點）；38.2%～61.8% 的淡色帶常被稱為「黃金回撤區」。','同價的高低點取最近一次；收盤離某條線小於波段幅度 0.2% 時視為「正好在線附近」。'],
  read:'圖下方讀數列會寫出波段起訖、目前已回撤（或反彈）幾 %、上下最近的兩條線與距離；今天仍在創波段新高／新低時標「尚未回撤」。',
- note:['沒有可靠的證據顯示價格會在這些比例轉折，請把它當成「大家可能在看的價位」。','改變分析天數，波段就會跟著變；今天的高低點明天可能被改寫。'],
+ note:['沒有可靠的證據顯示價格會在這些比例轉折，請把它當成「大家可能在看的價位」。','切換主K線圖的區間，波段就會跟著變；今天的高低點明天可能被改寫。'],
  now:function(P){ var b=P.fibonacci; if(!b) return null; if(!b.available) return '無法計算：'+(b.reason||'資料不足');
    var up=b.direction==='up', a=up?b.low:b.high, z=up?b.high:b.low;
    return (up?'上升波段 ':'下跌波段 ')+a.date+' '+f(a.price)+' → '+z.date+' '+f(z.price)+'；'+
@@ -258,6 +258,67 @@ var ENTRIES = [
  calc:'顯示期間內，收盤比前一日上漲的天數、下跌的天數各佔比例；平盤另外計算。',
  note:'這是已經發生的歷史統計，不是預測。',
  now:function(P){ var t=P.tech; return P.bars_count+' 個交易日中 '+t.ups+' 漲 / '+t.downs+' 跌 / '+t.flats+' 平（上漲日 '+f(t.up_ratio,0)+'%）'; }},
+
+/* ===== K 線型態與籌碼分佈（0928a） ===== */
+{id:'kline-range', cat:'pattern', term:'主K線圖的區間與開關', en:'chart range · overlays',
+ where:[1],
+ what:'主K線圖可以切換「近 60／120／250 日」或跟分析天數相同，右側有籌碼成本分佈，上方可以開關型態標註、支撐壓力、布林通道、費波南希。',
+ calc:['均線、布林通道在完整歷史上計算，所以切到 250 日時前段不會空白。','費波南希的波段高低點取自目前選的區間；切換區間，回撤價位會跟著變。','開關與區間記在這台電腦的瀏覽器，下次開啟沿用；離線匯出的報告也能切換。'],
+ read:'看型態與籌碼分佈建議用 120 日以上：太短的區間樣本少，價值區和 POC 容易被一兩天的大量左右。',
+ now:function(){ var k=kstate(); return k?'目前顯示近 '+k.r+' 日'+(k.vp?'，籌碼分佈開啟':'')+(k.pat?'，型態標註開啟':''):null; }},
+{id:'candle-pattern', cat:'pattern', term:'K 線型態標註（▲ 多方 ▼ 空方 ◆ 中性）', en:'candlestick patterns',
+ where:[1],
+ what:'依開高低收自動辨識常見的 K 線型態，標在 K 棒上下：看漲的標在最低價下方（紅色 ▲），看跌的標在最高價上方（綠色 ▼），十字線是中性（黃色 ◆）。',
+ calc:['吞：吞噬（多頭或空頭）、晨／暮：晨星／暮星、十：十字線、錘：錘子線、吊：吊人線、流：流星線、三：紅三兵（▲）或黑三鴉（▼）','跳空缺口畫成虛線框（紅＝向上、綠＝向下），一直延伸到價格回補缺口為止','頭肩頂／頭肩底畫出左肩、頭、右肩與黃色虛線頸線；✓＝收盤已突破／跌破頸線，？＝還在等待確認','「走弱／走強之後」＝型態前一天的收盤低於／高於 5 個交易日前，用來分辨錘子線與吊人線這類同形不同義的型態'],
+ read:'上方的型態勾選列可以只留想看的型態；滑鼠移到 K 棒上會列出當天的型態與這檔股票的歷史勝率。',
+ note:['型態是描述 K 棒形狀的慣例，不是買賣訊號；同一天可能同時出現多空不同的型態。','使用未還原股價，除權息當天的跳空會被當成缺口。'],
+ now:function(){ var k=kstate(); if(!k||!k.counts) return null; return '近 '+k.r+' 日：多方 '+k.counts.bull+'、空方 '+k.counts.bear+'、中性 '+k.counts.neutral+' 次'; }},
+{id:'pattern-winrate', cat:'pattern', term:'型態歷史勝率（5／10 日上漲機率）', en:'historical hit rate',
+ where:[1],
+ calc:['把這檔股票最多近 10 年的日K全部掃一遍，找出每一次出現同一個型態的日子。','上漲機率＝那天收盤之後第 5（或 10）個交易日的收盤比較高的次數 ÷ 可以統計的次數；平均＝同期間報酬的平均。','對照基準：全部交易日的 5 日上漲比例。型態的上漲機率要和它比，才知道有沒有比「隨便一天」好。','頭肩型態以收盤突破／跌破頸線那天計；缺口以出現缺口那天計。'],
+ read:'例如「5 日上漲機率 42%（近 10 年 n=95，平均 −0.24%）」：過去 95 次出現這個型態後，5 天後比較高的有 42%，平均跌 0.24%。',
+ note:['只用這一檔自己的歷史、未還原股價，不含手續費與稅；n 少於 20 時在說明表裡以淡色顯示。','相鄰的型態會重疊、市場狀態會變，歷史比例不能拿來預測下一次。','第一次分析一檔股票時會多抓一次近 10 年的日K（FinMind），之後只補新的日子；證交所來源只用已抓到的期間。'],
+ now:function(P){ var p=P.patterns; if(!p||!p.baseline||!p.baseline.n5) return null; return '統計期間 '+p.span.label+'（'+p.span.bars+' 個交易日），全部交易日 5 日上漲 '+f(p.baseline.up5,0)+'%'; }},
+{id:'engulfing', cat:'pattern', term:'吞噬（多頭吞噬／空頭吞噬）', en:'engulfing',
+ where:[1],
+ calc:['多頭吞噬：前 5 日走弱，前一根是黑K，今天是紅K，而且今天的實體（開到收）完全包住昨天的實體。','空頭吞噬：前 5 日走強，前一根是紅K，今天是黑K並包住昨天的實體。'],
+ read:'常被視為短線方向可能反轉的訊號，要搭配量能與位置（例如是否在支撐或壓力附近）一起看。'},
+{id:'star', cat:'pattern', term:'晨星／暮星', en:'morning · evening star',
+ where:[1],
+ calc:['晨星（三根）：下跌中先出現長黑K，接著一根實體很小、位置更低的K，第三根紅K收過第一根實體的一半。','暮星：上漲中的長紅K → 小實體、位置更高的K → 收破第一根實體一半的黑K。','「長」＝實體至少是前 10 根平均實體；「小」＝不到第一根實體的 35%。']},
+{id:'doji', cat:'pattern', term:'十字線', en:'doji',
+ where:[1],
+ calc:'實體（開盤與收盤的差）不到當天最高最低振幅的 10%，而且振幅至少 0.4%。',
+ read:'代表多空力量接近平衡；出現在長期上漲或下跌之後，常被解讀為動能減弱。十字線本身不分多空。'},
+{id:'hammer', cat:'pattern', term:'錘子線／吊人線／流星線', en:'hammer · hanging man · shooting star',
+ where:[1],
+ calc:['錘子線：前 5 日走弱後，下影線至少是實體 2 倍、也佔振幅一半以上，上影線很短（≤ 振幅 15%）。','吊人線：形狀和錘子線一樣，但出現在前 5 日走強之後。','流星線：前 5 日走強後，上影線至少是實體 2 倍、下影線很短。'],
+ read:'長下影線表示盤中曾被賣低、收盤又被買回；長上影線表示曾被買高、又被賣回。同樣的形狀在不同位置意義不同。'},
+{id:'three-soldiers', cat:'pattern', term:'紅三兵／黑三鴉', en:'three white soldiers · three black crows',
+ where:[1],
+ calc:['紅三兵：連續 3 根紅K、收盤一天比一天高，每根都開在前一根的實體之內，而且都收在接近最高價（上影線不到實體的 40%）。','黑三鴉：連續 3 根黑K、收盤一天比一天低，條件相反。','連續 4 根以上時只記第一次。']},
+{id:'gap', cat:'pattern', term:'跳空缺口與回補', en:'price gap',
+ where:[1],
+ calc:['向上跳空：今天最低價 > 昨天最高價，而且缺口 ≥ 前一日收盤的 0.5%；缺口範圍是昨天最高價～今天最低價。','向下跳空：今天最高價 < 昨天最低價，範圍是今天最高價～昨天最低價。','回補：之後價格回到缺口的另一側（向上缺口：最低價 ≤ 缺口下緣）。虛線框畫到回補那天為止；還沒回補的框延伸到最新一天。'],
+ read:'尚未回補的向上缺口常被當成支撐、向下缺口當成壓力；圖下方的摘要會列出還沒回補的缺口。',
+ note:'除權息當天因為參考價下調，常出現「假缺口」，請配合除權息標記判斷。'},
+{id:'head-shoulders', cat:'pattern', term:'頭肩頂／頭肩底與頸線', en:'head and shoulders',
+ where:[1],
+ calc:['先找出轉折點：左右各 5 根 K 棒內的最高點與最低點。','頭肩頂：連續三個高點中間最高（頭），兩側（肩）高度相近，兩個低點連成頸線；右肩之後 40 根內收盤跌破頸線才算確認（✓）。','頭肩底：三個低點中間最低，兩個高點連成頸線，收盤突破頸線才確認。','還在等待突破、價格也沒有超過頭部的，標「？」；價格超過頭部就不再視為頭肩型態。'],
+ read:'頸線突破後，常見的說法是之後的波動幅度可能接近「頭到頸線」的距離，但這只是經驗法則。',
+ note:'型態辨識用固定規則，和人工畫線不一定相同；樣本通常很少，歷史勝率僅供參考。'},
+{id:'volume-profile', cat:'pattern', term:'籌碼成本分佈（成交量分佈）', en:'volume profile',
+ where:[1],
+ what:'主K線圖右側的橫條：把目前區間每一天的成交量，平均分攤到那天最低價～最高價之間的價位，再依價位加總，看哪些價格累積最多成交。',
+ calc:['紅色＝收紅K（收盤 ≥ 開盤）那幾天的量，綠色＝收黑K的量。','價位分成 22～48 格（依圖的高度）；用滑鼠滾輪縮放 K 棒時，會用可見的那一段重新計算。'],
+ read:'成交很集中的價位代表很多人在那附近買賣，價格回到那裡時常出現拉鋸；成交稀少的價位，價格比較容易快速通過。',
+ note:'這是用日K估計的，不是逐筆分價成交，也不是真正的持股成本。',
+ now:function(){ var k=kstate(); return k&&k.vp?'近 '+k.r+' 日 POC '+f(k.vp.poc)+'，價值區 '+f(k.vp.val)+'～'+f(k.vp.vah):null; }},
+{id:'value-area', cat:'pattern', term:'POC、價值區、VAH 壓力帶與 VAL 支撐帶', en:'POC · value area',
+ where:[1],
+ calc:['POC（Point of Control）：成交量最多的那一格價位，圖上用黃色虛線橫貫整張圖。','價值區：從 POC 開始，每次往上或往下加入量比較多的那一格，直到涵蓋總成交量的 70%；圖上是淺藍色帶。','VAH＝價值區上緣（壓力帶）、VAL＝價值區下緣（支撐帶）。'],
+ read:'收盤在價值區內代表價格還在「多數人成交」的區間；站上 VAH 常被解讀為突破密集區，跌破 VAL 則相反。圖下方的摘要會寫出收盤在價值區的哪一側。',
+ now:function(P){ var k=kstate(); if(!k||!k.vp) return null; var c=P.quote.close; return '收盤 '+f(c)+(c>k.vp.vah?' 在價值區上方':c<k.vp.val?' 在價值區下方':' 在價值區內'); }},
 
 /* ===== 法人與信用交易 ===== */
 {id:'inst', cat:'chip', term:'三大法人買賣超', en:'institutional net buy/sell',
@@ -449,11 +510,35 @@ var ENTRIES = [
  note:'槓桿、反向 ETF 追蹤的是「每日」倍數，持有多天的報酬不等於指數報酬的倍數。'},
 {id:'sector-rotation', cat:'market', term:'族群輪動（四象限）', en:'sector rotation',
  where:['sector'],
- calc:['每個族群取成員的等權平均報酬：橫軸＝20 日平均報酬（中期），縱軸＝5 日平均報酬（短期）。','右上「領漲」：5 日、20 日都為正；左上「轉強」：20 日仍為負但 5 日轉正；右下「轉弱」：20 日為正但 5 日轉負；左下「落後」：兩者皆負。','泡泡大小＝族群波動；每個族群至少要 3 檔有資料才計算。'],
+ calc:['每個族群取成員的等權平均報酬：橫軸＝20 日平均報酬（中期），縱軸＝5 日平均報酬（短期）。','右上「領漲」：5 日、20 日都為正；左上「轉強」：20 日仍為負但 5 日轉正；右下「轉弱」：20 日為正但 5 日轉負；左下「落後」：兩者皆負。','泡泡大小＝族群成員 20 日平均成交值的合計（開根號縮放）；每個族群至少要 3 檔有資料才計算。','黃框＝動能加速（見「動能加速度」）；名稱前有 🔔＝3 日內剛換象限。點泡泡會畫出這個族群最近 10 天的移動軌跡。'],
  read:'常見的解讀是族群會沿著「落後 → 轉強 → 領漲 → 轉弱」逆時針輪動，可以用來找「剛轉強」或「還在領漲」的題材，再點進去看成員。',
  note:'等權平均讓小型股和大型股影響一樣大；輪動只是描述過去 5／20 日的相對表現，不保證會照順序繼續走。',
  now:function(P,M,K){ if(!K) return null; var c={}; K.sectors.forEach(function(g){c[g.quadrant]=(c[g.quadrant]||0)+1;});
    return '領漲 '+(c['領漲']||0)+'、轉強 '+(c['轉強']||0)+'、轉弱 '+(c['轉弱']||0)+'、落後 '+(c['落後']||0)+' 個族群'; }},
+{id:'quadrant-change', cat:'market', term:'象限轉換提醒（🔔）', en:'quadrant change',
+ where:['sector'],
+ calc:'用最近 20 個交易日每天的 5 日、20 日平均報酬判斷當天的象限；最新象限和前 3 個交易日中任何一天不同，就標 🔔，並寫出是從哪個象限轉進來。',
+ read:'「由落後轉入轉強」「由轉強轉入領漲」是常被關注的輪動；「由領漲轉入轉弱」代表短線開始降溫。',
+ note:'象限以 0 為界，報酬在 0 附近來回時會頻繁換象限，要搭配動能加速度與成交值一起看。',
+ now:function(P,M,K){ if(!K) return null; var n=0; K.sectors.forEach(function(g){ var h=g.hist; if(!h) return; var q=function(i){var a=h.r5[i],b=h.r20[i];return ok(a)&&ok(b)?(b>=0?(a>=0?1:2):(a>=0?3:4)):0;}; var L=h.r5.length-1; for(var i=L-1;i>=Math.max(0,L-3);i--){ if(q(i)&&q(i)!==q(L)){n++;break;} } }); return n+' 個族群在 3 日內換象限'; }},
+{id:'sector-heat', cat:'market', term:'強弱熱力矩陣', en:'strength heatmap',
+ where:['sector'],
+ calc:['列＝族群、欄＝最近 20 個交易日，格子顏色：紅＝強、綠＝弱，顏色深淺依全部格子的最大幅度自動縮放。','當日漲跌：族群成員當天漲跌的等權平均；5 日報酬：當天往前 5 個交易日的平均報酬；相對大盤：當日漲跌 − 全市場（流動性門檻以上的一般股票）平均。'],
+ read:'一整列持續偏紅代表族群強勢延續；由綠翻紅的列是正在轉強的族群。'},
+{id:'sector-rank', cat:'market', term:'排名變化', en:'rank changes',
+ where:['sector'],
+ calc:'每天把目前分類裡的族群依 5 日平均報酬排名（第 1 名最強），畫成折線；醒目標示最新排名前 8 的族群。',
+ read:'線從下往上爬＝排名快速進步；在前幾名停留很久的是持續強勢的族群。滑鼠移到線上看起點到最新的名次變化。'},
+{id:'sector-timeline', cat:'market', term:'象限時間軸', en:'quadrant timeline',
+ where:['sector'],
+ calc:'每一格是族群在那一天所在的象限（領漲紅、轉強黃、轉弱紫、落後綠）；列依最新象限排序。',
+ read:'可以看出輪動的節奏：例如連續幾天由綠變黃再變紅，就是「落後 → 轉強 → 領漲」。',
+ note:'20 日報酬需要 21 個交易日的資料，掃描期間選 20 日時只看得到最後幾天。'},
+{id:'sector-accel', cat:'market', term:'動能加速度', en:'momentum acceleration',
+ where:['sector'],
+ calc:'動能加速度＝今天的 5 日平均報酬 − 5 個交易日前的 5 日平均報酬（百分點）。',
+ read:'正值＝短線動能變強（例如跌勢趨緩或漲勢加快），負值＝降溫。加速度 ≥ +2 的族群在四象限雷達上會加黃框。',
+ note:'加速度只看變化，不看方向：同樣 +3，可能是從 −5% 回到 −2%，也可能是從 +2% 加速到 +5%。'},
 {id:'sector-vol', cat:'market', term:'族群波動', en:'volatility',
  where:['sector'],
  calc:'每檔成員先算近 20 日「每日對數報酬」的標準差 × √252 × 100（年化波動 %），族群取成員的中位數。',
@@ -465,7 +550,7 @@ var ENTRIES = [
 {id:'themes', cat:'market', term:'官方產業別與概念族群', en:'industries · themes',
  where:['sector'],
  calc:['官方產業別：FinMind 股票清單的產業分類（例如半導體業、航運業）；一檔股票同時有「電子工業」這種大分類和細分類時，取細分類。','概念族群：AI 伺服器、CoWoS、散熱、矽智財等題材分組，預設是程式作者整理的範例。'],
- read:'在「族群輪動」下方的「編輯概念族群」可以新增、刪除或修改成員，存在程式資料夾的 themes.json；「恢復預設」會把自訂檔改名成 themes.json.bak 保留。',
+ read:'按「族群輪動」右上的「自訂族群」：每列一個族群，成分股用逗號分隔，只填代號也可以（會自動帶入名稱）。可以匯出／匯入 JSON 備份或分享；按「儲存並重算」後存在程式資料夾的 themes.json；「還原預設」要按兩次確認，原本的自訂檔會改名成 themes.json.bak 保留。',
  note:'題材成員是人工整理的，公司業務會變，請依自己的判斷維護。'},
 {id:'price-alert', cat:'market', term:'到價警示', en:'price alerts',
  where:['alert','toolbar'],
@@ -505,6 +590,7 @@ var dialog=null, opener=null, flashTimer=null, place=null;   // place：速查�
 function payload(){ try{ return window.TWBoard&&TWBoard.payload?TWBoard.payload():null; }catch(e){ return null; } }
 function macroData(){ try{ return window.TWBoard&&TWBoard.macro?TWBoard.macro():null; }catch(e){ return null; } }
 function marketData(){ try{ return window.TWMarket&&TWMarket.data?TWMarket.data():null; }catch(e){ return null; } }
+function kstate(){ try{ return window.TWBoard&&TWBoard.kstate?TWBoard.kstate():null; }catch(e){ return null; } }
 function whereText(list){
   return (list||[]).map(function(w){ return typeof w==='number'?CARDS[w]:PLACES[w]; }).filter(Boolean);
 }

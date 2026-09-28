@@ -93,7 +93,14 @@ details.adv[open] summary::before{content:'▾ ';}
   background:var(--surface);border:1px solid var(--border);border-radius:10px;
   padding:26px 22px;color:var(--muted);font-size:calc(12.5px * var(--font-scale, 1));line-height:1.9;
 }
-#welcome h2{margin:0 0 12px;font-size:calc(14px * var(--font-scale, 1));color:var(--ink);font-weight:600;}
+#welcome h2{margin:0 0 12px;font-size:calc(16px * var(--font-scale, 1));color:var(--ink);font-weight:700;}
+.wl-steps{list-style:none;margin:0 0 14px;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}
+.wl-steps li{background:var(--plane);border:1px solid var(--border);border-radius:9px;padding:12px 14px;display:flex;flex-direction:column;gap:4px;line-height:1.65}
+.wl-steps b{color:var(--ink);font-size:calc(14px * var(--font-scale, 1));display:flex;align-items:center;gap:8px}
+.wl-steps b i{font-style:normal;display:inline-flex;width:22px;height:22px;border-radius:50%;background:#3d6fd8;color:#fff;align-items:center;justify-content:center;font-size:calc(12px * var(--font-scale, 1))}
+.wl-steps span{color:var(--ink-2);font-size:calc(12.5px * var(--font-scale, 1))}
+.wl-more{margin:12px 0 4px;color:var(--ink-2)}
+.wl-note{margin:4px 0 0;color:var(--muted);font-size:calc(11.5px * var(--font-scale, 1));line-height:1.7}
 #welcome code{background:var(--surface-2);padding:1px 6px;border-radius:4px;color:var(--ink-2);font-size:calc(12px * var(--font-scale, 1));}
 #welcome .ex{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0 2px;}
 
@@ -102,6 +109,32 @@ details.adv[open] summary::before{content:'▾ ';}
 .load-top,.load-bottom{display:flex;justify-content:space-between;gap:8px 16px;flex-wrap:wrap;font-size:calc(12px * var(--font-scale, 1));color:var(--ink-2);}
 .load-bottom{font-size:calc(11px * var(--font-scale, 1));color:var(--muted);}
 #load-bar{width:100%;height:9px;margin:10px 0;accent-color:var(--s1);}
+/* ================= 0928a 捲動後出現的精簡頁首 ================= */
+.qnav{position:fixed;left:0;right:0;top:0;z-index:40;display:flex;align-items:center;gap:8px 14px;padding:6px max(12px,calc((100vw - 2100px)/2 + 16px));
+  background:rgba(14,18,27,.94);backdrop-filter:blur(6px);border-bottom:1px solid #2a3450;box-shadow:0 4px 18px rgba(0,0,0,.35);transform:translateY(-110%);transition:transform .18s ease}
+.qnav[hidden]{display:flex;visibility:hidden}
+.qnav.show{transform:none;visibility:visible}
+.qn-brand{color:#e2e8ff;font-weight:700;text-decoration:none;white-space:nowrap;font-size:calc(13px * var(--font-scale,1))}
+.qn-brand b{color:#8fb0ff;margin-left:4px;font-weight:600}
+.qn-form{display:flex;gap:6px}
+.qn-form input{width:190px;background:var(--plane);color:var(--ink);border:1px solid var(--border);border-radius:7px;padding:5px 9px;font:inherit;font-size:calc(12.5px * var(--font-scale,1))}
+.qn-form input:focus{outline:2px solid var(--s1);outline-offset:-1px}
+.qn-go{background:#628afb;border:1px solid #7898ff;color:#fff;border-radius:7px;padding:5px 12px;font:inherit;font-size:calc(12.5px * var(--font-scale,1));font-weight:600;cursor:pointer}
+.qn-cur{background:#1d2a45;border:1px solid #3c5487;color:#fff;border-radius:7px;padding:4px 10px;font:inherit;font-size:calc(12.5px * var(--font-scale,1));cursor:pointer;white-space:nowrap;font-variant-numeric:tabular-nums}
+.qn-cur small{color:var(--ink-2);margin:0 6px}
+.qn-links{display:flex;gap:4px;margin-left:auto;overflow-x:auto;scrollbar-width:none}
+.qn-links button{background:none;border:1px solid transparent;border-radius:6px;color:var(--ink-2);padding:5px 10px;font:inherit;font-size:calc(12.5px * var(--font-scale,1));cursor:pointer;white-space:nowrap}
+.qn-links button:hover{color:#fff;border-color:var(--border)}
+.qn-links button.on{color:#fff;background:#23304d;border-color:#3c5487}
+.qn-links button[hidden]{display:none}
+.qn-links .qn-gl{border-color:#3c5487;border-radius:50%;width:28px;height:28px;padding:0;font-weight:700}
+html{scroll-padding-top:58px}
+@media(max-width:900px){.qn-brand{display:none}.qn-form input{width:140px}}
+@media(max-width:600px){.qnav{flex-wrap:wrap;gap:6px;padding:6px 8px}.qn-cur{display:none}.qn-links{margin-left:0;width:100%}.qn-form{flex:1}.qn-form input{flex:1;width:auto}}
+@media print{.qnav{display:none!important}}
+.macro.collapsed>:not(.macro-head){display:none!important}
+.macro.collapsed .macro-head{margin-bottom:0}
+
 /* ================= 自選股比較 ================= */
 .compare{margin-bottom:14px;padding:15px;background:var(--surface);border:1px solid var(--border);border-radius:10px;}
 .compare[hidden]{display:none;}
@@ -230,11 +263,43 @@ button.mk-scan:disabled{opacity:.6;cursor:progress}
 .mk-members[hidden]{display:none}
 .mk-members-head{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin-bottom:8px}
 .mk-members-head span{color:var(--muted);font-size:calc(11px * var(--font-scale,1));flex:1}
-.mk-themes{margin-top:12px;border-top:1px solid var(--border);padding-top:8px}
-.mk-themes summary{cursor:pointer;font-size:calc(12px * var(--font-scale,1));color:var(--ink-2)}
-.mk-themes summary span{color:var(--muted);margin-left:6px}
-.mk-theme{display:grid;grid-template-columns:180px minmax(0,1fr) auto;gap:8px;margin:6px 0;align-items:start}
-.mk-theme textarea{resize:vertical;min-height:32px;font-variant-numeric:tabular-nums}
+.mk-sector-bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+.mk-sector-bar .mk-chips{margin:0}
+.mk-te-open{display:inline-flex;align-items:center;gap:6px}
+.mk-te-open #mk-theme-state{color:var(--muted);font-size:calc(11px * var(--font-scale,1))}
+.mk-te{margin:6px 0 12px;padding:12px 14px;background:var(--plane);border:1px solid #33456d;border-radius:10px;box-shadow:0 6px 22px rgba(0,0,0,.35)}
+.mk-te[hidden]{display:none}
+.mk-te-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 14px;margin-bottom:10px}
+.mk-te-head h3{margin:0;font-size:calc(15px * var(--font-scale,1));color:#8fb0ff;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px}
+.mk-te-head h3 small{font-size:calc(12px * var(--font-scale,1));color:var(--ink-2);font-weight:400}
+.mk-te-actions{display:flex;flex-wrap:wrap;gap:6px}
+.mk-primary{background:#3d6fd8!important;border-color:#5b86e8!important;color:#fff!important;font-weight:700}
+.mk-primary:hover{background:#4a7ce6!important}
+.mk-te-close{width:34px;padding-left:0!important;padding-right:0!important}
+.mk-te-rows{max-height:430px;overflow:auto;padding-right:4px;display:grid;gap:6px}
+.mk-theme{display:grid;grid-template-columns:minmax(120px,220px) minmax(0,1fr) 36px;gap:8px;align-items:center}
+.mk-theme input{width:100%;min-height:34px;font-variant-numeric:tabular-nums}
+.mk-theme .mk-te-name{font-weight:600}
+.mk-te .mk-theme input{background:#151b28;border-color:#2c3850}
+.mk-te-del{height:34px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--muted);cursor:pointer;display:flex;align-items:center;justify-content:center}
+.mk-te-del:hover{color:#ff9a9a;border-color:#a14e55}
+.mk-te-msg{display:block;color:#9ec5f4;margin-top:4px}
+.mk-te-msg.warn{color:#ffb4a8}
+.mk-views{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 8px}
+.mk-views button{display:inline-flex;align-items:center;gap:7px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--ink-2);padding:8px 14px;font:inherit;font-size:calc(13px * var(--font-scale,1));font-weight:600;cursor:pointer}
+.mk-views button i{font-style:normal;color:var(--muted)}
+.mk-views button[aria-selected=true]{background:#2f5fc7;border-color:#5b86e8;color:#fff;box-shadow:0 2px 10px rgba(57,135,229,.28)}
+.mk-views button[aria-selected=true] i{color:#fff}
+.mk-views button:hover{color:#fff;border-color:#4a6aa8}
+.mk-views button:focus-visible{outline:2px solid #9ec5f4;outline-offset:1px}
+.mk-view-opts{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.mk-view-opts:empty{display:none}
+.mk-legend{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:calc(11.5px * var(--font-scale,1));color:var(--ink-2);margin:-4px 0 10px}
+.mk-legend:empty{display:none}
+.mk-legend span{display:inline-flex;align-items:center;gap:5px}
+.mk-legend i{display:inline-block;width:11px;height:11px;border-radius:50%;font-style:normal}
+.mk-bell{color:#f2c94c;font-weight:700}
+.mk-acc{font-variant-numeric:tabular-nums}
 .mk-form{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:flex-end;margin:4px 0 6px}
 .mk-form input{width:120px}#mk-al-note{width:160px}
 .mk-sell{display:inline-flex;gap:4px;align-items:center}.mk-sell input{width:84px;padding:3px 6px}.mk-sell input[type=date]{width:128px}
@@ -245,7 +310,7 @@ button.mk-scan:disabled{opacity:.6;cursor:progress}
 .mk-summary small{font-size:calc(11px * var(--font-scale,1))}
 .mk-sub{font-size:calc(12.5px * var(--font-scale,1));margin:14px 0 6px;color:var(--ink-2)}
 .mk-alert-on{color:var(--warn)}
-@media(max-width:700px){.market{padding:10px}.mk-ctrl{width:100%}.mk-ctrl label{flex:1 1 140px}.mk-ctrl select{width:100%}.mk-chart{height:360px}.mk-theme{grid-template-columns:1fr}.mk-form input{width:100%}.mk-form label{flex:1 1 140px}.mk-tabs button{padding:7px 8px}}
+@media(max-width:700px){.market{padding:10px}.mk-ctrl{width:100%}.mk-ctrl label{flex:1 1 140px}.mk-ctrl select{width:100%}.mk-chart{height:380px}.mk-theme{grid-template-columns:minmax(0,1fr) 36px}.mk-theme .mk-te-codes{grid-column:1/-1;grid-row:2}.mk-views button{padding:7px 10px;font-size:calc(12px * var(--font-scale,1))}.mk-form input{width:100%}.mk-form label{flex:1 1 140px}.mk-tabs button{padding:7px 8px}}
 @media print{.market{display:none}}
 </style>
 <!--__ECHARTS__-->
@@ -253,7 +318,24 @@ button.mk-scan:disabled{opacity:.6;cursor:progress}
 <body class="live-app">
 <div class="wrap">
 
-  <header class="app-head">
+  <nav class="qnav" id="qnav" aria-label="快速前往" hidden>
+    <a class="qn-brand" href="#top" data-qn-go="top">台股戰略產生器<b id="qn-ver"></b></a>
+    <form class="qn-form" id="qn-form" autocomplete="off" role="search">
+      <input id="qn-code" maxlength="60" placeholder="輸入代號，按 Enter 分析" aria-label="快速分析股票代號">
+      <button type="submit" class="qn-go">分析</button>
+    </form>
+    <button type="button" class="qn-cur" id="qn-cur" data-qn-go="stage" hidden></button>
+    <div class="qn-links">
+      <button type="button" data-qn-go="stage">圖表</button>
+      <button type="button" data-qn-go="comparison">比較表</button>
+      <button type="button" data-qn-go="market">市場掃描</button>
+      <button type="button" data-qn-go="macro">全球市場</button>
+      <button type="button" class="qn-gl" data-glossary-open="" aria-label="指標名詞解釋" title="指標名詞解釋">?</button>
+      <button type="button" data-qn-go="top" title="回到頂端" aria-label="回到頂端">↑</button>
+    </div>
+  </nav>
+
+  <header class="app-head" id="top">
     <button type="button" class="gl-open" id="gl-open" data-glossary-open="" aria-haspopup="dialog" aria-label="指標名詞解釋" title="指標名詞解釋：每個指標是什麼、怎麼算、怎麼看"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9.4 9.3a2.7 2.7 0 1 1 3.9 2.4c-.8.4-1.3 1-1.3 1.9v.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="17.1" r="1.15" fill="currentColor"/></svg><span class="gl-label">指標名詞解釋</span></button>
     <div class="app-title">
       <h1>__APP_TITLE__</h1>
@@ -338,22 +420,26 @@ button.mk-scan:disabled{opacity:.6;cursor:progress}
   </header>
 
   <div id="welcome">
-    <h2>輸入股票代號，按「產生圖表」</h2>
-    程式會抓日K、三大法人買賣超、融資融券，算出均線、KD、MACD、RSI、ATR 等指標，排成 18 格儀表板。<br>
-    分析天數是<b>畫面上顯示</b>的交易日數；指標另外會往回多抓約 100 個交易日暖身，所以就算只看 30 天，MA60 和 MACD 一樣是正確值。<br>
+    <h2>三個步驟開始</h2>
+    <ol class="wl-steps">
+      <li><b><i>1</i>輸入股票代號</b><span>在上方輸入代號（可用逗號一次輸入最多 10 檔），或直接點下面的範例。</span></li>
+      <li><b><i>2</i>按「產生圖表」</b><span>自動抓日K、三大法人、融資融券，算好均線、KD、MACD、RSI 等指標；多檔會同時處理，進度顯示在上方。</span></li>
+      <li><b><i>3</i>看主K線圖與 18 格分析</b><span>主K線圖標出 K 線型態、跳空缺口、頭肩型態與右側的籌碼成本分佈；滑鼠移到標記，可看這檔股票過去出現同一型態後的漲跌統計。</span></li>
+    </ol>
     <div class="ex">
       <button class="chip" data-ex="2330">2330 台積電</button>
       <button class="chip" data-ex="3374">3374 精材（上櫃）</button>
-      <button class="chip" data-ex="2330,2317,2454">三檔一起</button>
+      <button class="chip" data-ex="2330,2317,2454">三檔一起比較</button>
     </div>
-    所有分數都是規則計分，不是勝率也不是預測；取不到的資料一律標「無資料」，不用推估值填補。
+    <p class="wl-more">想先找標的？到下方「市場掃描」按「開始掃描」，看選股清單、漲幅排行、熱門 ETF 與族群輪動（四象限雷達、強弱熱力矩陣、排名變化、象限時間軸、動能加速度）。看不懂某個名詞，按右上角「指標名詞解釋」。</p>
+    <p class="wl-note">分析天數是 18 格畫面上顯示的交易日數，指標另外往回多抓約 100 個交易日暖身；主K線圖可以另外切換 60／120／250 日。所有分數都是規則計分，不是勝率也不是預測；取不到的資料一律標「無資料」，不用推估值填補。</p>
   </div>
 
   <section class="macro" id="macro" aria-labelledby="macro-title" hidden>
     <div class="macro-head">
       <h2 id="macro-title">全球市場與匯率</h2>
       <span class="macro-meta" id="macro-meta"></span>
-      <span class="macro-ctrl"><button type="button" class="btn" id="macro-refresh">更新</button></span>
+      <span class="macro-ctrl"><button type="button" class="btn" id="macro-refresh">更新</button><button type="button" class="btn" id="macro-toggle" aria-expanded="true">收合</button></span>
     </div>
     <div class="macro-tiles" id="macro-tiles"></div>
     <div class="macro-charts">
@@ -419,20 +505,42 @@ button.mk-scan:disabled{opacity:.6;cursor:progress}
       <div class="mk-scroll"><table class="mk-table" id="mk-etf-table"></table></div>
     </div>
     <div class="mk-panel" data-mk-panel="sector" role="tabpanel" hidden>
-      <div class="mk-chips" id="mk-sector-chips">
-        <button type="button" data-mk-kind="" aria-pressed="true">全部族群</button><button type="button" data-mk-kind="產業" aria-pressed="false">官方產業別</button>
-        <button type="button" data-mk-kind="概念" aria-pressed="false">概念族群</button>
+      <div class="mk-sector-bar">
+        <div class="mk-chips" id="mk-sector-chips">
+          <button type="button" data-mk-kind="" aria-pressed="true">全部族群</button><button type="button" data-mk-kind="產業" aria-pressed="false">官方產業別</button>
+          <button type="button" data-mk-kind="概念" aria-pressed="false">概念族群</button>
+        </div>
+        <button type="button" class="btn mk-te-open" id="mk-theme-open" aria-expanded="false" aria-controls="mk-themes"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>自訂族群<span id="mk-theme-state"></span></button>
       </div>
-      <p class="mk-rule">橫軸＝20 日平均報酬（中期），縱軸＝5 日平均報酬（短期），泡泡越大波動越大。右上＝領漲、左上＝轉強、右下＝轉弱、左下＝落後。點泡泡或族群名稱看成員。</p>
+      <div class="mk-te" id="mk-themes" hidden>
+        <div class="mk-te-head">
+          <h3>自訂族群<small>每列一個族群，成分股用逗號分隔；只填代號也可以（自動帶入名稱）</small></h3>
+          <div class="mk-te-actions">
+            <button type="button" class="btn" id="mk-theme-add">＋ 新增族群</button>
+            <button type="button" class="btn" id="mk-theme-export" title="下載目前編輯中的族群，可備份或分享">↓ 匯出 JSON</button>
+            <button type="button" class="btn" id="mk-theme-import" title="從 JSON 檔載入族群（按「儲存並重算」才會生效）">↑ 匯入 JSON</button>
+            <input type="file" id="mk-theme-file" accept=".json,application/json" hidden>
+            <button type="button" class="btn" id="mk-theme-reset" title="改回程式內建的範例族群；原本的自訂檔會改名為 themes.json.bak">↺ 還原預設</button>
+            <button type="button" class="btn mk-primary" id="mk-theme-save">儲存並重算</button>
+            <button type="button" class="btn mk-te-close" id="mk-theme-close" aria-label="關閉自訂族群">✕</button>
+          </div>
+        </div>
+        <div class="mk-te-rows" id="mk-theme-rows"></div>
+        <p class="mk-rule">預設族群是程式作者整理的範例，成員可能過時，請依自己的判斷修改。每個族群 2～60 檔、最多 40 個族群；存在程式資料夾的 themes.json。<span class="mk-te-msg" id="mk-theme-msg" role="status"></span></p>
+      </div>
+      <div class="mk-views" role="tablist" aria-label="族群輪動圖表">
+        <button type="button" role="tab" data-mk-view="radar" aria-selected="true"><i aria-hidden="true">◎</i>四象限雷達</button>
+        <button type="button" role="tab" data-mk-view="heat" aria-selected="false"><i aria-hidden="true">▦</i>強弱熱力矩陣</button>
+        <button type="button" role="tab" data-mk-view="rank" aria-selected="false"><i aria-hidden="true">⇅</i>排名變化</button>
+        <button type="button" role="tab" data-mk-view="timeline" aria-selected="false"><i aria-hidden="true">▤</i>象限時間軸</button>
+        <button type="button" role="tab" data-mk-view="accel" aria-selected="false"><i aria-hidden="true">➚</i>動能加速度</button>
+      </div>
+      <div class="mk-view-opts" id="mk-view-opts"></div>
+      <p class="mk-rule" id="mk-sector-rule"></p>
       <div class="chart mk-chart" id="mk-sector-chart"></div>
+      <div class="mk-legend" id="mk-sector-legend"></div>
       <div class="mk-members" id="mk-members" hidden></div>
       <div class="mk-scroll"><table class="mk-table" id="mk-sector-table"></table></div>
-      <details class="mk-themes" id="mk-themes">
-        <summary>編輯概念族群<span id="mk-theme-state"></span></summary>
-        <p class="mk-rule">預設族群是程式作者整理的範例，成員可能過時，請依自己的判斷修改。代號用逗號或空白分隔；每個族群 2～60 檔，最多 40 個族群。存在程式資料夾的 themes.json。</p>
-        <div id="mk-theme-rows"></div>
-        <div class="mk-actions"><button type="button" class="btn" id="mk-theme-add">新增族群</button><button type="button" class="btn" id="mk-theme-save">儲存族群</button><button type="button" class="btn" id="mk-theme-reset">恢復預設</button><span class="mk-hint" id="mk-theme-msg" role="status"></span></div>
-      </details>
     </div>
     <div class="mk-panel" data-mk-panel="alerts" role="tabpanel" hidden>
       <form class="mk-form" id="mk-alert-form" autocomplete="off">
@@ -622,6 +730,7 @@ async function analyseWithProgress(data,index,total){
   return pollJob(started.job_id,function(job){ loadProgress(index,total,job); });
 }
 
+var scrollAfterShow = false;   // 按「產生圖表」後，第一檔畫好就捲到結果
 function show(code){
   var d = results[code];
   if(!d || d==='FAIL') return;
@@ -634,6 +743,11 @@ function show(code){
   if(typeof drawMembers==="function") drawMembers();
   if(!busy) summary();
   try{ history.replaceState(null,'','?code='+encodeURIComponent(code)); }catch(e){}
+  if(scrollAfterShow){
+    scrollAfterShow = false;
+    var to = (order.length>1 && !$('comparison').hidden) ? $('comparison') : $('stage');
+    requestAnimationFrame(function(){ var r=to.getBoundingClientRect(); if(r.top>innerHeight*0.6||r.bottom<60) to.scrollIntoView({behavior:'smooth',block:'start'}); });
+  }
 }
 
 function fetchLabel(d){
@@ -803,7 +917,7 @@ $('filter-export').addEventListener('click',function(){
       comparisonNotes(d).join(' · ')||'資料齊全',d.source,d.dmi?d.dmi.adx:null,d.dmi?d.dmi.plus_di:null,d.dmi?d.dmi.minus_di:null,d.volume_analysis?d.volume_analysis.state:'',d.score_model,condition,exported]);
   });
   var url=URL.createObjectURL(new Blob(['\uFEFF'+rows.map(function(row){return row.map(comparisonCsvCell).join(',');}).join('\r\n')+'\r\n'],{type:'text/csv;charset=utf-8'}));
-  var a=document.createElement('a');a.href=url;a.download='自選股篩選_20260925c_'+exported.slice(0,10)+'.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url);},1000);
+  var a=document.createElement('a');a.href=url;a.download='自選股篩選_0928a_'+exported.slice(0,10)+'.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url);},1000);
   $('preset-msg').textContent='已匯出 '+codes.length+' 檔，依目前表格排序；未完成或失敗的股票不列入。';
 });
 function drawComparison(){
@@ -959,6 +1073,7 @@ $('form').addEventListener('submit', async function(e){
   }
   compareCollapsed = codes.length===1;
   results = {}; order = codes.slice(); current = null; failures = {}; loadingCode = null;
+  scrollAfterShow = true;
   $('stage').hidden = true;
   $('welcome').hidden = true;
   drawChips();
@@ -1123,6 +1238,65 @@ async function loadMacro(force){
 }
 $('macro-refresh').addEventListener('click', function(){ loadMacro(true); });
 $('a-yahoo').addEventListener('change', function(){ save(); loadMacro(true); });
+
+/* ---------- 0928a：全球市場可收合（記在這台電腦的瀏覽器） ---------- */
+function setMacroCollapsed(on){
+  $('macro').classList.toggle('collapsed',on);
+  $('macro-toggle').textContent=on?'展開':'收合';
+  $('macro-toggle').setAttribute('aria-expanded',String(!on));
+  try{ localStorage.setItem('twboard.macro.collapsed',on?'1':'0'); }catch(e){}
+  if(!on) setTimeout(function(){ TWBoard.resize(); },30);
+}
+$('macro-toggle').addEventListener('click',function(){ setMacroCollapsed(!$('macro').classList.contains('collapsed')); });
+try{ if(localStorage.getItem('twboard.macro.collapsed')==='1') setMacroCollapsed(true); }catch(e){}
+
+/* ---------- 0928a：捲動後出現的精簡頁首：快速分析、目前股票、區塊跳轉 ---------- */
+(function(){
+  var nav=$('qnav'), head=document.querySelector('.app-head');
+  if(!nav||!head) return;
+  nav.hidden=false;
+  var m=/([0-9]{4,8}[a-z])版/.exec(document.querySelector('h1').textContent); $('qn-ver').textContent=m?m[1]:'';
+  var e2=function(v){return compareEscape(v===undefined||v===null?'':v);};
+  if('IntersectionObserver' in window){
+    new IntersectionObserver(function(es){ nav.classList.toggle('show',!es[0].isIntersecting); },{rootMargin:'-30px 0px 0px 0px'}).observe(head);
+  }
+  function target(k){ return k==='top'?head:$(k); }
+  nav.addEventListener('click',function(e){
+    var b=e.target.closest('[data-qn-go]'); if(!b) return;
+    e.preventDefault(); var t=target(b.dataset.qnGo);
+    if(t&&!t.hidden) t.scrollIntoView({behavior:'smooth',block:'start'});
+  });
+  $('qn-form').addEventListener('submit',function(e){
+    e.preventDefault(); var v=$('qn-code').value.trim(); if(!v) return;
+    $('f-code').value=v; $('qn-code').value=''; $('form').requestSubmit();
+  });
+  var pending=false;
+  function sync(){
+    pending=false;
+    ['stage','comparison','market','macro'].forEach(function(id){
+      var b=nav.querySelector('.qn-links [data-qn-go="'+id+'"]'); if(b) b.hidden=!$(id)||$(id).hidden;
+    });
+    var P=window.TWBoard&&TWBoard.payload&&TWBoard.payload(), c=$('qn-cur');
+    if(P&&!$('stage').hidden&&P.quote){
+      var q=P.quote, k=q.chg_pct>0?'up':q.chg_pct<0?'down':'flat';
+      c.hidden=false;
+      c.innerHTML='<b>'+e2(P.code)+'</b><small>'+e2(P.name)+'</small>'+compareNumber(q.close,2)+' <span class="'+k+'">'+(q.chg_pct>0?'▲':q.chg_pct<0?'▼':'')+compareNumber(q.chg_pct,2,true)+'%</span>';
+      c.title='回到 '+P.code+' 的圖表';
+    }else c.hidden=true;
+  }
+  function later(){ if(!pending){ pending=true; requestAnimationFrame(sync); } }
+  new MutationObserver(later).observe(document.querySelector('.wrap'),{subtree:true,attributes:true,attributeFilter:['hidden'],childList:true,characterData:true});
+  if('IntersectionObserver' in window){
+    var seen={};
+    var io=new IntersectionObserver(function(es){
+      es.forEach(function(x){ seen[x.target.id]=x.isIntersecting?x.intersectionRatio:0; });
+      var best=null; Object.keys(seen).forEach(function(id){ if(seen[id]>0&&(!best||seen[id]>seen[best])) best=id; });
+      nav.querySelectorAll('.qn-links [data-qn-go]').forEach(function(b){ b.classList.toggle('on',b.dataset.qnGo===best); });
+    },{threshold:[0,.15,.3,.5]});
+    ['stage','comparison','market','macro'].forEach(function(id){ if($(id)) io.observe($(id)); });
+  }
+  sync();
+})();
 
 load();
 loadGroups();

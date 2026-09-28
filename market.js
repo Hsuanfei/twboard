@@ -37,9 +37,7 @@ function note(text,warn){var n=$('mk-note');n.textContent=text||'';n.classList.t
 function analyse(codes){
   if(document.body.classList.contains('loading')){note('上一批分析還在進行，請稍候再點。',true);return;}
   $('f-code').value=codes.join(',');
-  $('form').requestSubmit();
-  var target=$('comparison');
-  if(target) setTimeout(function(){target.scrollIntoView({behavior:'smooth',block:'start'});},60);
+  $('form').requestSubmit();          // 第一檔畫好後，頁面會自動捲到結果
 }
 
 /* ---------- 表格 ---------- */
@@ -138,65 +136,273 @@ function drawETF(){
   stockTable('mk-etf-table',list,cols,'沒有 ETF 資料');
 }
 
-/* ---------- 族群輪動 ---------- */
+/* ---------- 族群輪動（0928a）：四象限雷達、強弱熱力矩陣、排名變化、象限時間軸、動能加速度 ---------- */
 var QCOLOR={'領漲':function(){return cssVar('--up');},'轉強':function(){return '#c98500';},'轉弱':function(){return '#9085e9';},'落後':function(){return cssVar('--down');}};
+var QORDER=['領漲','轉強','轉弱','落後'];
+var sectorView='radar', heatKey='day';
+try{ var sv=localStorage.getItem('twboard.market.sectorView'); if(['radar','heat','rank','timeline','accel'].indexOf(sv)>=0) sectorView=sv; }catch(e){}
+var VIEW_RULES={
+  radar:'橫軸＝20 日平均報酬（中期動能），縱軸＝5 日平均報酬（短期動能），座標自動縮放；泡泡越大＝成員 20 日均成交值越大。右上＝領漲、左上＝轉強、右下＝轉弱、左下＝落後。點泡泡或族群名稱看成員與最近 10 天的移動軌跡。',
+  heat:'每一列是一個族群、每一欄是一個交易日，顏色越紅越強、越綠越弱。可切換「當日漲跌」「5 日報酬」或「相對大盤」（族群當日平均漲跌減全市場平均）。列依最新一天排序。',
+  rank:'依每天的 5 日平均報酬排名（第 1 名最強）。醒目標示最新排名前 8 的族群，其餘淡灰；滑鼠移到線上看排名變化，點線看成員。',
+  timeline:'每一格是那一天所在的象限。可以看出族群從「落後 → 轉強 → 領漲 → 轉弱」的輪動節奏；需要 60 個交易日的掃描期間才有完整 20 天。',
+  accel:'動能加速度＝今天的 5 日報酬 − 5 個交易日前的 5 日報酬（百分點）。正值代表短線動能正在變強、負值代表正在降溫；和目前漲跌方向一起看。'
+};
+function qOf(r5,r20){ if(!ok(r5)||!ok(r20)) return null; return r20>=0?(r5>=0?'領漲':'轉弱'):(r5>=0?'轉強':'落後'); }
 function sectors(){return (data?data.sectors:[]).filter(function(g){return !sectorKind||g.kind===sectorKind;});}
+function sdates(){ return (data&&data.sector_dates)||[]; }
+/* 衍生：每天的象限、3 日內是否換象限、加速度 */
+function derive(g){
+  if(g._d) return g._d;
+  var h=g.hist||{r5:[],r20:[],day:[]}, n=h.r5.length, qs=h.r5.map(function(v,i){return qOf(v,h.r20[i]);});
+  var now=g.quadrant, prev=null;
+  for(var k=n-2;k>=Math.max(0,n-4);k--){ if(qs[k]&&qs[k]!==now){ prev=qs[k]; break; } }
+  var acc=(n>5&&ok(h.r5[n-1])&&ok(h.r5[n-6]))?Math.round((h.r5[n-1]-h.r5[n-6])*100)/100:null;
+  g._d={qs:qs, changed:!!prev, prev:prev, accel:acc, fast:ok(acc)&&acc>=2};
+  return g._d;
+}
+function chartScale(){ return parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--font-scale'))||1; }
+function tipBase(scale){ return {backgroundColor:'rgba(16,20,28,.96)',borderColor:'rgba(255,255,255,.14)',textStyle:{color:'#fff',fontSize:12*scale},confine:true}; }
+function setChartHeight(px){ var node=$('mk-sector-chart'); node.style.height=px?Math.round(px)+'px':''; }
 function drawSector(){
-  var list=sectors();
-  var node=$('mk-sector-chart');
+  var list=sectors(), node=$('mk-sector-chart');
+  document.querySelectorAll('[data-mk-view]').forEach(function(b){b.setAttribute('aria-selected',String(b.dataset.mkView===sectorView));});
+  $('mk-sector-rule').textContent=VIEW_RULES[sectorView];
+  drawViewOpts();
   if(chart){chart.dispose();chart=null;}
-  if(!data||!list.length){node.innerHTML='<div class="empty">'+(data?'這個分類沒有足夠的族群（每個族群至少 3 檔）':'尚未掃描')+'</div>';drawSectorTable();return;}
+  setChartHeight(0);
+  $('mk-sector-legend').innerHTML='';
+  if(!data||!list.length){node.innerHTML='<div class="empty">'+(data?'這個分類沒有足夠的族群（每個族群至少 3 檔）':'尚未掃描：按右上角「開始掃描」')+'</div>';drawSectorTable();return;}
   node.innerHTML='';
   if(typeof echarts==='undefined'){node.textContent='圖表元件沒有載入';drawSectorTable();return;}
-  var pts=list.filter(function(g){return ok(g.r5)&&ok(g.r20);});
-  var xs=pts.map(function(g){return Math.abs(g.r20);}), ys=pts.map(function(g){return Math.abs(g.r5);});
-  var xr=Math.max(2,Math.ceil(Math.max.apply(null,xs.concat([1]))*1.15)), yr=Math.max(2,Math.ceil(Math.max.apply(null,ys.concat([1]))*1.15));
-  var ink=cssVar('--ink-2'), muted=cssVar('--muted'), grid=cssVar('--grid'), axis=cssVar('--axis');
-  var scale=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--font-scale'))||1;
-  chart=echarts.init(node,null,{renderer:'canvas'});
-  var corner=function(text,pos,color){return Object.assign({type:'text',silent:true,style:{text:text,fill:color,font:'600 '+Math.round(11*scale)+'px sans-serif',opacity:.85}},pos);};
-  chart.setOption({
-    animation:false, backgroundColor:'transparent',
-    grid:{left:52,right:18,top:24,bottom:40},
-    tooltip:{trigger:'item',backgroundColor:'#1b2130',borderColor:'#2c3446',textStyle:{color:'#fff',fontSize:12*scale},formatter:function(p){
-      var g=p.data.g;
-      return '<b>'+esc(g.name)+'</b>（'+esc(g.kind)+'，'+g.count+' 檔）<br>5 日 '+sg(g.r5)+'% · 20 日 '+sg(g.r20)+'% · 60 日 '+(ok(g.r60)?sg(g.r60)+'%':'—')+
-        '<br>波動 '+(ok(g.vol)?nf(g.vol,0)+'%':'—')+' · 象限 '+esc(g.quadrant)+'<br>代表股：'+g.leaders.map(function(x){return esc(x.name);}).join('、');}},
-    xAxis:{type:'value',min:-xr,max:xr,name:'20 日平均報酬（%）',nameLocation:'middle',nameGap:26,nameTextStyle:{color:muted,fontSize:11*scale},
-           axisLabel:{color:muted,fontSize:10*scale,formatter:function(v){return (v>0?'+':'')+v+'%';}},splitLine:{lineStyle:{color:grid}},axisLine:{lineStyle:{color:axis}}},
-    yAxis:{type:'value',min:-yr,max:yr,name:'5 日平均報酬（%）',nameLocation:'middle',nameGap:38,nameTextStyle:{color:muted,fontSize:11*scale},
-           axisLabel:{color:muted,fontSize:10*scale,formatter:function(v){return (v>0?'+':'')+v+'%';}},splitLine:{lineStyle:{color:grid}},axisLine:{lineStyle:{color:axis}}},
-    graphic:[corner('轉強 ↗ 短期發動',{left:62,top:30},'#c98500'),corner('領漲 ▲ 短中期皆強',{right:26,top:30},QCOLOR['領漲']()),
-             corner('落後 ▽ 短中期皆弱',{left:62,bottom:48},QCOLOR['落後']()),corner('轉弱 ↘ 短期退潮',{right:26,bottom:48},'#9085e9')],
-    series:[{type:'scatter',data:pts.map(function(g){
-        var size=Math.max(9,Math.min(34,6+(ok(g.vol)?g.vol:30)*0.4));
-        return {value:[g.r20,g.r5],g:g,name:g.name,symbolSize:activeSector===g.name?size+6:size,
-          itemStyle:{color:QCOLOR[g.quadrant]?QCOLOR[g.quadrant]():muted,opacity:activeSector&&activeSector!==g.name?.45:.88,
-                     borderColor:activeSector===g.name?'#fff':'rgba(0,0,0,.25)',borderWidth:activeSector===g.name?2:1}};}),
-      label:{show:true,formatter:function(p){return p.data.g.name;},position:'top',color:ink,fontSize:10*scale},
-      labelLayout:{hideOverlap:true},emphasis:{focus:'self',label:{fontWeight:'bold'}},
-      markLine:{silent:true,symbol:'none',lineStyle:{color:axis,type:'dashed'},label:{show:false},data:[{xAxis:0},{yAxis:0}]}}]
-  });
-  chart.on('click',function(p){ if(p.data&&p.data.g) showMembers(p.data.g.name); });
+  var fn={radar:drawRadar,heat:drawHeat,rank:drawRankChange,timeline:drawTimeline,accel:drawAccel}[sectorView]||drawRadar;
+  var msg=fn(list);
+  if(msg){ if(chart){chart.dispose();chart=null;} setChartHeight(0); node.innerHTML='<div class="empty">'+esc(msg)+'</div>'; }
+  if(chart) chart.on('click',function(p){ var name=p.data&&p.data.g?p.data.g.name:(p.seriesName&&p.seriesType==='line'?p.seriesName:null); if(!name&&p.data&&p.data.name) name=p.data.name; if(name&&(data.sectors||[]).some(function(g){return g.name===name;})) showMembers(name); });
   drawSectorTable();
 }
+function drawViewOpts(){
+  var box=$('mk-view-opts');
+  if(sectorView!=='heat'){ box.innerHTML=''; return; }
+  box.innerHTML='<span class="mk-hint">顏色代表</span><div class="mk-chips">'+[['day','當日漲跌'],['r5','5 日報酬'],['rel','相對大盤（當日）']].map(function(x){
+    return '<button type="button" data-mk-heat="'+x[0]+'" aria-pressed="'+(heatKey===x[0])+'">'+x[1]+'</button>';}).join('')+'</div>';
+}
+function axisStyle(extra){
+  var muted=cssVar('--muted'), grid=cssVar('--grid'), axis=cssVar('--axis'), s=chartScale();
+  return Object.assign({axisLabel:{color:muted,fontSize:10*s},splitLine:{lineStyle:{color:grid}},axisLine:{lineStyle:{color:axis}},axisTick:{show:false},nameTextStyle:{color:muted,fontSize:11*s}},extra||{});
+}
+function pctFmt(v){return (v>0?'+':'')+v+'%';}
+
+/* 四象限雷達 */
+function drawRadar(list){
+  var pts=list.filter(function(g){return ok(g.r5)&&ok(g.r20);});
+  if(!pts.length) return '族群報酬資料不足';
+  var xs=pts.map(function(g){return Math.abs(g.r20);}), ys=pts.map(function(g){return Math.abs(g.r5);});
+  var xr=Math.max(2,Math.ceil(Math.max.apply(null,xs.concat([1]))*1.15)), yr=Math.max(2,Math.ceil(Math.max.apply(null,ys.concat([1]))*1.15));
+  var trail=[], act=activeSector&&pts.filter(function(g){return g.name===activeSector;})[0];
+  if(act&&act.hist){
+    var h=act.hist, n=h.r5.length;
+    for(var i=Math.max(0,n-10);i<n;i++) if(ok(h.r5[i])&&ok(h.r20[i])) trail.push([h.r20[i],h.r5[i],sdates()[i]]);
+    trail.forEach(function(p){ xr=Math.max(xr,Math.ceil(Math.abs(p[0])*1.1)); yr=Math.max(yr,Math.ceil(Math.abs(p[1])*1.1)); });
+  }
+  var ink=cssVar('--ink-2'), scale=chartScale(), maxAmt=Math.max.apply(null,pts.map(function(g){return g.amount||0;}).concat([1]));
+  var up=cssVar('--up'), down=cssVar('--down');
+  chart=echarts.init($('mk-sector-chart'),null,{renderer:'canvas'});
+  var corner=function(text,pos,color){return Object.assign({type:'text',silent:true,style:{text:text,fill:color,font:'700 '+Math.round(13*scale)+'px sans-serif',opacity:.95}},pos);};
+  var tint=function(x0,y0,x1,y1,c){return [{xAxis:x0,yAxis:y0,itemStyle:{color:c}},{xAxis:x1,yAxis:y1}];};
+  chart.setOption({
+    animation:false, backgroundColor:'transparent',
+    grid:{left:56,right:22,top:26,bottom:46},
+    tooltip:Object.assign(tipBase(scale),{trigger:'item',formatter:function(p){
+      if(p.seriesName==='軌跡') return esc(activeSector)+'<br>'+esc(p.data[2]||'')+'　5 日 '+sg(p.data[1])+'% · 20 日 '+sg(p.data[0])+'%';
+      var g=p.data.g, d=derive(g);
+      return '<b>'+esc(g.name)+'</b>（'+esc(g.kind)+'，'+g.count+' 檔）<br>5 日 '+sg(g.r5)+'% · 20 日 '+sg(g.r20)+'% · 60 日 '+(ok(g.r60)?sg(g.r60)+'%':'—')+
+        '<br>象限 '+esc(g.quadrant)+(d.changed?'　<span style="color:#f2c94c">🔔 3 日內由「'+esc(d.prev)+'」轉入</span>':'')+
+        '<br>動能加速度 '+(ok(d.accel)?sg(d.accel)+' 個百分點':'—')+' · 20 日均成交值 '+money(g.amount)+
+        '<br>代表股：'+g.leaders.map(function(x){return esc(x.name);}).join('、');}}),
+    xAxis:axisStyle({type:'value',min:-xr,max:xr,name:'20 日平均報酬（中期動能）· 座標自動縮放',nameLocation:'middle',nameGap:28,axisLabel:{color:cssVar('--muted'),fontSize:10*scale,formatter:pctFmt}}),
+    yAxis:axisStyle({type:'value',min:-yr,max:yr,name:'5 日平均報酬（短期動能）',nameLocation:'middle',nameGap:40,axisLabel:{color:cssVar('--muted'),fontSize:10*scale,formatter:pctFmt}}),
+    graphic:[corner('轉強 ↗ 短期發動',{left:66,top:32},'#e0a21b'),corner('領漲 ▲ 短中期皆強',{right:30,top:32},up),
+             corner('落後 ▽ 短中期皆弱',{left:66,bottom:54},down),corner('轉弱 ↘ 短期退潮',{right:30,bottom:54},'#a79cf0'),
+             {type:'text',right:30,bottom:78,silent:true,style:{text:data.latest_date||'',fill:'rgba(255,255,255,.07)',font:'800 '+Math.round(34*scale)+'px sans-serif'}}],
+    series:[{type:'scatter',name:'族群',data:pts.map(function(g){
+        var d=derive(g), size=Math.round(12+30*Math.sqrt((g.amount||0)/maxAmt)), on=activeSector===g.name;
+        return {value:[g.r20,g.r5],g:g,name:g.name,symbolSize:on?size+6:size,
+          itemStyle:{color:QCOLOR[g.quadrant]?QCOLOR[g.quadrant]():cssVar('--muted'),opacity:activeSector&&!on?.4:.9,
+                     borderColor:on?'#fff':d.fast?'#f2c94c':'rgba(0,0,0,.35)',borderWidth:on?2.5:d.fast?3:1,
+                     shadowBlur:d.changed?14:0,shadowColor:'rgba(242,201,76,.7)'},
+          label:{color:d.changed?'#f2c94c':ink,fontWeight:d.changed||on?'bold':'normal'}};}),
+      label:{show:true,formatter:function(p){return (derive(p.data.g).changed?'🔔 ':'')+p.data.g.name;},position:'top',fontSize:11*scale,
+             textBorderColor:'rgba(10,13,20,.85)',textBorderWidth:2},
+      labelLayout:{hideOverlap:true},emphasis:{focus:'self',label:{fontWeight:'bold'}},z:3,
+      markArea:{silent:true,data:[tint(0,0,xr,yr,'rgba(229,72,77,.07)'),tint(-xr,0,0,yr,'rgba(224,162,27,.06)'),
+                                   tint(-xr,-yr,0,0,'rgba(23,164,75,.07)'),tint(0,-yr,xr,0,'rgba(144,133,233,.07)')]},
+      markLine:{silent:true,symbol:'none',lineStyle:{color:cssVar('--axis'),type:'dashed'},label:{show:false},data:[{xAxis:0},{yAxis:0}]}},
+      {type:'line',name:'軌跡',data:trail,symbol:'circle',symbolSize:function(v,p){return p.dataIndex===trail.length-1?9:5;},z:4,
+       lineStyle:{color:'#fff',width:1.6,type:'dashed',opacity:.8},itemStyle:{color:'#fff'},
+       label:{show:true,formatter:function(p){return p.dataIndex===0?(p.data[2]||'').slice(5):'';},color:'#fff',fontSize:10*scale,position:'bottom'}}]
+  });
+  $('mk-sector-legend').innerHTML='<span><b class="mk-bell">🔔</b>3 日內剛換象限</span><span><i style="border:2px solid #f2c94c;width:12px;height:12px"></i>黃框＝動能加速（5 日報酬比 5 天前高 2 個百分點以上）</span>'+
+    '<span><i style="background:'+up+'"></i>領漲</span><span><i style="background:#c98500"></i>轉強</span><span><i style="background:#9085e9"></i>轉弱</span><span><i style="background:'+down+'"></i>落後</span>'+
+    (act?'<span>白色虛線＝'+esc(act.name)+' 最近 10 天的軌跡（起點標日期）</span>':'<span>點泡泡看成員與軌跡</span>');
+}
+
+/* 強弱熱力矩陣 */
+function heatValue(g,i){
+  var h=g.hist; if(!h) return null;
+  if(heatKey==='r5') return h.r5[i];
+  var v=h.day[i];
+  if(heatKey==='rel'){ var m=data.market_hist&&data.market_hist.day[i]; return ok(v)&&ok(m)?Math.round((v-m)*100)/100:null; }
+  return v;
+}
+function drawHeat(list){
+  var ds=sdates(); if(ds.length<2) return '歷史天數不足';
+  var last=ds.length-1;
+  var rows=list.filter(function(g){return g.hist;}).slice().sort(function(a,b){var x=heatValue(a,last),y=heatValue(b,last);return (ok(y)?y:-1e9)-(ok(x)?x:-1e9);});
+  var cells=[], mx=0;
+  rows.forEach(function(g,r){ ds.forEach(function(_,i){ var v=heatValue(g,i); if(ok(v)){ mx=Math.max(mx,Math.abs(v)); cells.push([i,rows.length-1-r,v]); } }); });
+  if(!cells.length) return '沒有可顯示的資料';
+  mx=Math.max(1,Math.ceil(mx*0.8));
+  var scale=chartScale(), rowH=Math.max(18,Math.round(19*scale));
+  setChartHeight(Math.max(360,rows.length*rowH+110));
+  chart=echarts.init($('mk-sector-chart'),null,{renderer:'canvas'});
+  var names=rows.map(function(g){return g.name;}).reverse();
+  var label=heatKey==='r5'?'5 日報酬':heatKey==='rel'?'相對大盤':'當日漲跌';
+  chart.setOption({
+    animation:false, backgroundColor:'transparent',
+    grid:{left:12,right:18,top:14,bottom:62,containLabel:true},
+    tooltip:Object.assign(tipBase(scale),{formatter:function(p){
+      var g=rows[rows.length-1-p.data[1]], i=p.data[0];
+      var rk=rows.map(function(x){return heatValue(x,i);}).filter(ok).sort(function(a,b){return b-a;}).indexOf(p.data[2])+1;
+      return '<b>'+esc(g.name)+'</b>　'+esc(ds[i])+'<br>'+label+' '+sg(p.data[2])+'%'+(rk?'（當天第 '+rk+' 名）':'');}}),
+    xAxis:axisStyle({type:'category',data:ds.map(function(d){return d.slice(5);}),splitLine:{show:false},axisLabel:{color:cssVar('--muted'),fontSize:10*scale,interval:ds.length>12?1:0}}),
+    yAxis:axisStyle({type:'category',data:names,splitLine:{show:false},axisLabel:{color:cssVar('--ink-2'),fontSize:11*scale}}),
+    visualMap:{min:-mx,max:mx,calculable:false,orient:'horizontal',left:'center',bottom:6,itemWidth:12,itemHeight:180,text:['強 +'+mx+'%','弱 −'+mx+'%'],
+               textStyle:{color:cssVar('--muted'),fontSize:10*scale},inRange:{color:[cssVar('--down'),'#1b2230',cssVar('--up')]}},
+    series:[{type:'heatmap',data:cells,itemStyle:{borderColor:'#0b0e14',borderWidth:1},emphasis:{itemStyle:{borderColor:'#fff',borderWidth:1.5}},
+             label:{show:ds.length<=20&&rowH>=18,fontSize:9*scale,color:'rgba(255,255,255,.82)',formatter:function(p){return Math.abs(p.data[2])>=10?Math.round(p.data[2]):p.data[2].toFixed(1);}}}]
+  });
+  chart.on('click',function(p){ if(p.data) showMembers(rows[rows.length-1-p.data[1]].name); });
+}
+
+/* 排名變化 */
+function dailyRanks(list){
+  var ds=sdates(), out={};
+  list.forEach(function(g){out[g.name]=[];});
+  ds.forEach(function(_,i){
+    var vals=list.filter(function(g){return g.hist&&ok(g.hist.r5[i]);}).sort(function(a,b){return b.hist.r5[i]-a.hist.r5[i];});
+    list.forEach(function(g){ var r=vals.indexOf(g); out[g.name].push(r>=0?r+1:null); });
+  });
+  return out;
+}
+function drawRankChange(list){
+  var ds=sdates(); if(ds.length<3) return '歷史天數不足';
+  var ranks=dailyRanks(list), last=ds.length-1;
+  var withRank=list.filter(function(g){return ranks[g.name].some(ok);});
+  if(!withRank.length) return '5 日報酬資料不足';
+  var top=withRank.filter(function(g){return ok(ranks[g.name][last]);}).sort(function(a,b){return ranks[a.name][last]-ranks[b.name][last];}).slice(0,8).map(function(g){return g.name;});
+  if(activeSector&&top.indexOf(activeSector)<0) top.push(activeSector);
+  var pal=['#ff6b6b','#ffa94d','#ffd43b','#69db7c','#4dabf7','#9775fa','#f783ac','#63e6be','#ffffff'];
+  var scale=chartScale(), n=withRank.length;
+  setChartHeight(Math.max(420,Math.min(760,n*16+80)));
+  chart=echarts.init($('mk-sector-chart'),null,{renderer:'canvas'});
+  var series=withRank.map(function(g){
+    var k=top.indexOf(g.name), hot=k>=0;
+    var col=hot?pal[k%pal.length]:'rgba(160,168,184,.28)';
+    return {type:'line',name:g.name,data:ranks[g.name],connectNulls:false,symbol:hot?'circle':'none',symbolSize:5,z:hot?5:2,
+      lineStyle:{width:hot?2.4:1,color:col},itemStyle:{color:col},emphasis:{focus:'series',lineStyle:{width:3.2}},
+      endLabel:{show:hot,formatter:function(){return ranks[g.name][last]+'　'+g.name;},color:col,fontSize:11*scale,fontWeight:'bold'}};
+  });
+  chart.setOption({
+    animation:false, backgroundColor:'transparent',
+    grid:{left:46,right:170,top:16,bottom:34},
+    tooltip:Object.assign(tipBase(scale),{trigger:'item',formatter:function(p){
+      var r=ranks[p.seriesName], first=r.filter(ok)[0], now=r[last];
+      var diff=ok(first)&&ok(now)?first-now:null;
+      return '<b>'+esc(p.seriesName)+'</b><br>'+esc(ds[p.dataIndex])+' 第 '+p.data+' 名<br>'+esc(ds[0].slice(5))+' 第 '+(ok(first)?first:'—')+' 名 → 最新 第 '+(ok(now)?now:'—')+' 名'+
+        (ok(diff)?'（'+(diff>0?'↑ 進步 '+diff:diff<0?'↓ 退步 '+(-diff):'持平')+'）':'');}}),
+    xAxis:axisStyle({type:'category',data:ds.map(function(d){return d.slice(5);}),boundaryGap:false,splitLine:{show:false}}),
+    yAxis:axisStyle({type:'value',inverse:true,min:1,max:n,interval:Math.max(1,Math.ceil(n/10)),name:'名次',nameLocation:'start',nameGap:12}),
+    series:series
+  });
+  $('mk-sector-legend').innerHTML='<span>名次依 5 日平均報酬（1＝最強）· 右側是最新名次</span>';
+}
+
+/* 象限時間軸 */
+function drawTimeline(list){
+  var ds=sdates(); if(ds.length<2) return '歷史天數不足';
+  var rows=list.filter(function(g){return g.hist;}).slice().sort(function(a,b){
+    var qa=QORDER.indexOf(a.quadrant), qb=QORDER.indexOf(b.quadrant); if(qa!==qb) return qa-qb; return (ok(b.r5)?b.r5:-1e9)-(ok(a.r5)?a.r5:-1e9);});
+  var cells=[], any=0;
+  rows.forEach(function(g,r){ derive(g).qs.forEach(function(q,i){ if(q){ any++; cells.push([i,rows.length-1-r,QORDER.indexOf(q)]); } }); });
+  var full=rows.length?derive(rows[0]).qs.filter(Boolean).length:0;
+  if(!any) return '需要至少 21 個交易日才能判斷象限；請把掃描期間改成 60 個交易日後按「更新掃描」';
+  var scale=chartScale(), rowH=Math.max(18,Math.round(19*scale));
+  setChartHeight(Math.max(360,rows.length*rowH+110));
+  chart=echarts.init($('mk-sector-chart'),null,{renderer:'canvas'});
+  var names=rows.map(function(g){return g.name;}).reverse();
+  var colors=QORDER.map(function(q){return QCOLOR[q]();});
+  chart.setOption({
+    animation:false, backgroundColor:'transparent',
+    grid:{left:12,right:18,top:14,bottom:58,containLabel:true},
+    tooltip:Object.assign(tipBase(scale),{formatter:function(p){
+      var g=rows[rows.length-1-p.data[1]], i=p.data[0], h=g.hist;
+      return '<b>'+esc(g.name)+'</b>　'+esc(ds[i])+'<br>象限 '+QORDER[p.data[2]]+'<br>5 日 '+sg(h.r5[i])+'% · 20 日 '+sg(h.r20[i])+'%';}}),
+    xAxis:axisStyle({type:'category',data:ds.map(function(d){return d.slice(5);}),splitLine:{show:false},axisLabel:{color:cssVar('--muted'),fontSize:10*scale,interval:ds.length>12?1:0}}),
+    yAxis:axisStyle({type:'category',data:names,splitLine:{show:false},axisLabel:{color:cssVar('--ink-2'),fontSize:11*scale}}),
+    visualMap:{type:'piecewise',orient:'horizontal',left:'center',bottom:6,textStyle:{color:cssVar('--ink-2'),fontSize:11*scale},
+               pieces:QORDER.map(function(q,i){return {value:i,label:q,color:colors[i]};})},
+    series:[{type:'heatmap',data:cells,itemStyle:{borderColor:'#0b0e14',borderWidth:1.5},emphasis:{itemStyle:{borderColor:'#fff',borderWidth:1.5}}}]
+  });
+  chart.on('click',function(p){ if(p.data) showMembers(rows[rows.length-1-p.data[1]].name); });
+  if(full<ds.length) $('mk-sector-legend').innerHTML='<span>目前掃描期間較短，只有最近 '+full+' 天能判斷象限（20 日報酬需要 21 個交易日）。</span>';
+}
+
+/* 動能加速度 */
+function drawAccel(list){
+  var rows=list.filter(function(g){return ok(derive(g).accel);}).sort(function(a,b){return derive(b).accel-derive(a).accel;});
+  if(!rows.length) return '需要至少 11 個交易日才能計算動能加速度';
+  var scale=chartScale(), rowH=Math.max(18,Math.round(19*scale));
+  setChartHeight(Math.max(360,rows.length*rowH+70));
+  chart=echarts.init($('mk-sector-chart'),null,{renderer:'canvas'});
+  var up=cssVar('--up'), down=cssVar('--down'), names=rows.map(function(g){return g.name;}).reverse();
+  var mx=Math.max.apply(null,rows.map(function(g){return Math.abs(derive(g).accel);}).concat([1]));
+  var lim=Math.ceil(mx*1.12), st=lim<=4?1:lim<=10?2:lim<=24?5:10; lim=Math.ceil(lim/st)*st;
+  chart.setOption({
+    animation:false, backgroundColor:'transparent',
+    grid:{left:12,right:60,top:14,bottom:30,containLabel:true},
+    tooltip:Object.assign(tipBase(scale),{trigger:'item',formatter:function(p){
+      var g=p.data.g, h=g.hist, n=h.r5.length;
+      return '<b>'+esc(g.name)+'</b><br>動能加速度 '+sg(p.data.value)+' 個百分點<br>5 日報酬：5 天前 '+sg(h.r5[n-6])+'% → 今天 '+sg(h.r5[n-1])+'%<br>目前象限 '+esc(g.quadrant);}}),
+    xAxis:axisStyle({type:'value',min:-lim,max:lim,interval:st,name:'百分點',axisLabel:{color:cssVar('--muted'),fontSize:10*scale,formatter:function(v){return (v>0?'+':'')+v;}}}),
+    yAxis:axisStyle({type:'category',data:names,splitLine:{show:false},axisLabel:{color:cssVar('--ink-2'),fontSize:11*scale}}),
+    series:[{type:'bar',barMaxWidth:14,data:rows.slice().reverse().map(function(g){var a=derive(g).accel;return {value:a,g:g,name:g.name,itemStyle:{color:a>=0?up:down,borderRadius:a>=0?[0,3,3,0]:[3,0,0,3]}};}),
+             label:{show:true,position:'right',formatter:function(p){return (p.value>0?'+':'')+p.value;},color:cssVar('--ink-2'),fontSize:10*scale},
+             markLine:{silent:true,symbol:'none',lineStyle:{color:cssVar('--axis')},label:{show:false},data:[{xAxis:0}]}}]
+  });
+  $('mk-sector-legend').innerHTML='<span><i style="background:'+up+'"></i>加速（短線轉強）</span><span><i style="background:'+down+'"></i>減速（短線降溫）</span><span>黃框泡泡（四象限雷達）＝加速度 ≥ +2</span>';
+}
+
 function drawSectorTable(){
-  var cols=[['name','族群'],['kind','類型'],['count','檔數'],['today','今日'],['r5','5 日'],['r20','20 日'],['r60','60 日'],['vol','波動'],['up_ratio','今日上漲家數'],['quadrant','象限'],['leaders','代表股']];
+  var cols=[['name','族群'],['kind','類型'],['count','檔數'],['today','今日'],['r5','5 日'],['r20','20 日'],['r60','60 日'],['vol','波動'],['up_ratio','今日上漲家數'],['quadrant','象限'],['accel','加速度'],['leaders','代表股']];
   var list=sectors().slice();
   var k=sectorSort.key;
-  list.sort(function(a,b){var x=a[k],y=b[k];if(!ok(x))return 1;if(!ok(y))return -1;return (x-y)*sectorSort.dir;});
-  var sortable={count:1,today:1,r5:1,r20:1,r60:1,vol:1,up_ratio:1};
+  var val=function(g){return k==='accel'?derive(g).accel:g[k];};
+  list.sort(function(a,b){var x=val(a),y=val(b);if(!ok(x))return 1;if(!ok(y))return -1;return (x-y)*sectorSort.dir;});
+  var sortable={count:1,today:1,r5:1,r20:1,r60:1,vol:1,up_ratio:1,accel:1};
   $('mk-sector-table').innerHTML='<thead><tr>'+cols.map(function(c){
       if(!sortable[c[0]]) return '<th scope="col">'+c[1]+'</th>';
       var on=c[0]===k;
       return '<th scope="col" aria-sort="'+(on?(sectorSort.dir<0?'descending':'ascending'):'none')+'"><button type="button" class="mk-sort" data-mk-sort="'+c[0]+'">'+c[1]+'<span>'+(on?(sectorSort.dir<0?'▼':'▲'):'↕')+'</span></button></th>';
     }).join('')+'</tr></thead><tbody>'+
     (list.length?list.map(function(g){
+      var d=derive(g);
       var pct=function(v){return '<td class="'+cls(v)+'">'+(ok(v)?sg(v)+'%':'—')+'</td>';};
       return '<tr'+(g.name===activeSector?' class="selected"':'')+'><td><button type="button" class="mk-go" data-mk-sector="'+esc(g.name)+'">'+esc(g.name)+'</button></td>'+
         '<td>'+esc(g.kind)+'</td><td title="納入平均 '+g.count+' 檔，族群共 '+g.total+' 檔">'+g.count+(g.total>g.count?'<span class="flat"> / '+g.total+'</span>':'')+'</td>'+pct(g.today)+pct(g.r5)+pct(g.r20)+pct(g.r60)+
         '<td>'+(ok(g.vol)?nf(g.vol,0)+'%':'—')+'</td><td>'+(ok(g.up_ratio)?nf(g.up_ratio,0)+'%':'—')+'</td>'+
-        '<td><span class="mk-q" data-q="'+esc(g.quadrant||'')+'">'+esc(g.quadrant||'—')+'</span></td>'+
+        '<td><span class="mk-q" data-q="'+esc(g.quadrant||'')+'">'+esc(g.quadrant||'—')+'</span>'+(d.changed?' <span class="mk-bell" title="3 日內由「'+esc(d.prev)+'」轉入">🔔 由'+esc(d.prev)+'轉入</span>':'')+'</td>'+
+        '<td class="mk-acc '+cls(d.accel)+'">'+(ok(d.accel)?sg(d.accel):'—')+'</td>'+
         '<td class="mk-leaders">'+g.leaders.map(function(x){return '<button type="button" class="mk-mini" data-mk-go="'+esc(x.code)+'">'+esc(x.name)+'</button>';}).join('')+'</td></tr>';
     }).join(''):'<tr><td colspan="'+cols.length+'" class="mk-empty">'+(data?'沒有族群資料':'尚未掃描')+'</td></tr>')+'</tbody>';
 }
@@ -207,8 +413,10 @@ function showMembers(name){
   if(!g){box.hidden=true;return;}
   var m=byCode();
   var list=g.members.map(function(c){return m[c];}).filter(Boolean).sort(function(a,b){return (ok(b.r20)?b.r20:-1e9)-(ok(a.r20)?a.r20:-1e9);});
+  var d=derive(g);
   box.hidden=false;
-  box.innerHTML='<div class="mk-members-head"><b>'+esc(g.name)+'</b><span>'+esc(g.kind)+' · '+g.count+' 檔納入平均'+(g.missing.length?' · 找不到：'+esc(g.missing.join('、')):'')+'</span>'+
+  box.innerHTML='<div class="mk-members-head"><b>'+esc(g.name)+'</b><span>'+esc(g.kind)+' · '+g.count+' 檔納入平均 · 象限 '+esc(g.quadrant)+(d.changed?'（3 日內由「'+esc(d.prev)+'」轉入）':'')+
+    (ok(d.accel)?' · 加速度 '+sg(d.accel):'')+(g.missing.length?' · 找不到：'+esc(g.missing.join('、')):'')+'</span>'+
     '<button type="button" class="btn" data-mk-analyse-sector="'+esc(g.name)+'">分析前 10 檔</button><button type="button" class="btn" data-mk-close-members>關閉</button></div>'+
     '<div class="mk-scroll"><table class="mk-table"></table></div>';
   var t=box.querySelector('table'); t.id='mk-member-table';
@@ -217,21 +425,63 @@ function showMembers(name){
   box.scrollIntoView({behavior:'smooth',block:'nearest'});
 }
 
-/* ---------- 概念族群編輯 ---------- */
-function themeRow(t){
-  return '<div class="mk-theme"><input maxlength="20" value="'+esc(t.name)+'" aria-label="族群名稱" placeholder="族群名稱">'+
-    '<textarea rows="1" aria-label="成員代號" placeholder="代號，用逗號分隔">'+esc((t.codes||[]).join(', '))+'</textarea>'+
-    '<button type="button" class="btn" data-mk-theme-del>刪除</button></div>';
+/* ---------- 自訂族群（每列一個族群；成分股可只填代號，自動帶入名稱） ---------- */
+var themeNames={};
+var CODE_RE=/^([1-9]\d{3}|00\d{2,4}[A-Z]?)$/i;
+function nameOf(c){ var s=byCode()[c]; return (s&&s.name)||themeNames[c]||''; }
+function parseCodes(text){
+  var out=[];
+  String(text||'').split(/[,，、;；\n]+/).forEach(function(item){
+    var toks=item.trim().split(/\s+/).filter(Boolean); if(!toks.length) return;
+    (toks.every(function(t){return CODE_RE.test(t);})?toks:toks.slice(0,1)).forEach(function(c){ c=c.toUpperCase(); if(out.indexOf(c)<0) out.push(c); });
+  });
+  return out;
 }
+function membersText(codes){ return codes.map(function(c){ var n=CODE_RE.test(c)?nameOf(c):''; return n?c+' '+n:c; }).join(', '); }
+var TRASH='<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M5 7h14M10 7V5h4v2M7 7l1 13h8l1-13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/></svg>';
+function themeRow(t){
+  return '<div class="mk-theme"><input class="mk-te-name" maxlength="20" value="'+esc(t.name)+'" aria-label="族群名稱" placeholder="族群名稱">'+
+    '<input class="mk-te-codes" value="'+esc(membersText(t.codes||[]))+'" aria-label="成分股" placeholder="例如：2330, 2317 鴻海, 2454（只填代號也可以）">'+
+    '<button type="button" class="mk-te-del" data-mk-theme-del aria-label="刪除這個族群" title="刪除這個族群">'+TRASH+'</button></div>';
+}
+function drawThemes(){ $('mk-theme-rows').innerHTML=themes.map(themeRow).join(''); }
+function themeMsg(text,warn){ var m=$('mk-theme-msg'); m.textContent=text||''; m.classList.toggle('warn',!!warn); }
 async function loadThemes(){
-  try{var j=await api('/api/themes');themes=j.themes;$('mk-theme-state').textContent=j.custom?'（自訂）':'（預設範例）';}
-  catch(e){$('mk-theme-msg').textContent=e.message;themes=[];}
-  $('mk-theme-rows').innerHTML=themes.map(themeRow).join('');
+  try{var j=await api('/api/themes');themes=j.themes;themeNames=j.names||{};$('mk-theme-state').textContent=j.custom?'（自訂）':'（預設範例）';}
+  catch(e){themeMsg(e.message,true);themes=[];}
+  drawThemes();
 }
 function readThemes(){
   return Array.prototype.map.call($('mk-theme-rows').querySelectorAll('.mk-theme'),function(r){
-    return {name:r.querySelector('input').value.trim(),codes:r.querySelector('textarea').value};
-  }).filter(function(t){return t.name||t.codes.trim();});
+    var raw=r.querySelector('.mk-te-codes').value;
+    var codes=parseCodes(raw);
+    return {name:r.querySelector('.mk-te-name').value.trim(),codes:codes.length?codes:raw};
+  }).filter(function(t){return t.name||(typeof t.codes==='string'?t.codes.trim():t.codes.length);});
+}
+function openThemes(on){
+  $('mk-themes').hidden=!on; $('mk-theme-open').setAttribute('aria-expanded',String(on));
+  if(on&&!$('mk-theme-rows').children.length) loadThemes();
+  if(on) $('mk-themes').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+function exportThemes(){
+  var list=readThemes().map(function(t){return {name:t.name,codes:typeof t.codes==='string'?parseCodes(t.codes):t.codes};});
+  var d=new Date(), stamp=d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');
+  var blob=new Blob([JSON.stringify({app:'台股戰略產生器',kind:'themes',exported:d.toISOString().slice(0,10),themes:list},null,1)],{type:'application/json'});
+  var url=URL.createObjectURL(blob), a=document.createElement('a');a.href=url;a.download='族群_'+stamp+'.json';document.body.appendChild(a);a.click();a.remove();
+  setTimeout(function(){URL.revokeObjectURL(url);},1500);
+  themeMsg('已匯出 '+list.length+' 個族群');
+}
+function importThemes(file){
+  var rd=new FileReader();
+  rd.onload=function(){
+    try{
+      var j=JSON.parse(String(rd.result).replace(/^﻿/,'')), list=Array.isArray(j)?j:(j&&j.themes);
+      if(!Array.isArray(list)||!list.length) throw new Error('檔案裡沒有族群清單');
+      themes=list.map(function(t){ if(!t||typeof t.name!=='string') throw new Error('族群格式不正確'); return {name:t.name.slice(0,20),codes:Array.isArray(t.codes)?t.codes.map(String):parseCodes(t.codes)}; });
+      drawThemes(); themeMsg('已載入 '+themes.length+' 個族群，確認後按「儲存並重算」才會生效');
+    }catch(e){ themeMsg('匯入失敗：'+e.message,true); }
+  };
+  rd.readAsText(file,'utf-8');
 }
 
 /* ---------- 警示 ---------- */
@@ -314,7 +564,7 @@ function setTab(t){
   document.querySelectorAll('#market [data-mk-panel]').forEach(function(p){p.hidden=p.dataset.mkPanel!==t;});
   if(t==='alerts') loadAlerts();
   if(t==='paper') loadPaper();
-  if(t==='sector'&&!themes.length) loadThemes();
+  if(t==='sector'&&!themes.length&&!$('mk-themes').hidden) loadThemes();
   drawAll();
 }
 
@@ -431,9 +681,13 @@ $('market').addEventListener('click',function(e){
     api('/api/portfolio/delete',{id:b.dataset.mkPdel||b.dataset.mkCdel,which:which}).then(function(j){paper=j.portfolio;drawPaper();$('mk-pp-msg').textContent='已刪除紀錄';})
       .catch(function(err){$('mk-pp-msg').textContent=err.message;}); return;
   }
-  if(t.closest('[data-mk-theme-del]')){ t.closest('.mk-theme').remove(); $('mk-theme-msg').textContent='按「儲存族群」才會生效'; return; }
+  if(t.closest('[data-mk-theme-del]')){ t.closest('.mk-theme').remove(); themeMsg('已移除一列，按「儲存並重算」才會生效'); return; }
+  if((b=t.closest('[data-mk-view]'))){ sectorView=b.dataset.mkView; try{localStorage.setItem('twboard.market.sectorView',sectorView);}catch(err){} return drawSector(); }
+  if((b=t.closest('[data-mk-heat]'))){ heatKey=b.dataset.mkHeat; return drawSector(); }
 });
 $('market').addEventListener('change',function(e){
+  var tc=e.target.closest('.mk-te-codes');
+  if(tc){ var codes=parseCodes(tc.value); if(codes.length&&codes.every(function(c){return CODE_RE.test(c);})) tc.value=membersText(codes); return; }
   var c=e.target.closest('[data-mk-pick]');
   if(!c) return;
   var code=c.dataset.mkPick;
@@ -456,16 +710,25 @@ try{ if(localStorage.getItem('twboard.market.collapsed')==='1') setCollapsed(tru
 $('mk-amount').addEventListener('change',loadMarket);
 $('mk-market').addEventListener('change',drawAll);
 $('mk-etf-lev').addEventListener('change',drawETF);
-$('mk-theme-add').addEventListener('click',function(){ $('mk-theme-rows').insertAdjacentHTML('beforeend',themeRow({name:'',codes:[]})); $('mk-theme-rows').lastElementChild.querySelector('input').focus(); });
+$('mk-theme-open').addEventListener('click',function(){ openThemes($('mk-themes').hidden); });
+$('mk-theme-close').addEventListener('click',function(){ openThemes(false); $('mk-theme-open').focus(); });
+$('mk-theme-add').addEventListener('click',function(){ $('mk-theme-rows').insertAdjacentHTML('beforeend',themeRow({name:'',codes:[]})); var r=$('mk-theme-rows').lastElementChild; r.scrollIntoView({block:'nearest'}); r.querySelector('input').focus(); });
+$('mk-theme-export').addEventListener('click',exportThemes);
+$('mk-theme-import').addEventListener('click',function(){ $('mk-theme-file').value=''; $('mk-theme-file').click(); });
+$('mk-theme-file').addEventListener('change',function(){ if(this.files&&this.files[0]) importThemes(this.files[0]); });
 $('mk-theme-save').addEventListener('click',async function(){
-  try{ var j=await api('/api/themes',{themes:JSON.stringify(readThemes())}); themes=j.themes; $('mk-theme-state').textContent='（自訂）';
-       $('mk-theme-rows').innerHTML=themes.map(themeRow).join(''); $('mk-theme-msg').textContent='已儲存 '+themes.length+' 個族群'; await loadMarket(); }
-  catch(e){ $('mk-theme-msg').textContent=e.message; }
+  try{ var j=await api('/api/themes',{themes:JSON.stringify(readThemes())}); themes=j.themes; themeNames=j.names||themeNames; $('mk-theme-state').textContent='（自訂）';
+       drawThemes(); themeMsg('已儲存 '+themes.length+' 個族群，族群輪動已重新計算'); await loadMarket(); }
+  catch(e){ themeMsg(e.message,true); }
 });
+var resetArmed=null;
 $('mk-theme-reset').addEventListener('click',async function(){
-  try{ var j=await api('/api/themes/reset',{}); themes=j.themes; $('mk-theme-state').textContent='（預設範例）';
-       $('mk-theme-rows').innerHTML=themes.map(themeRow).join(''); $('mk-theme-msg').textContent='已恢復預設；原本的自訂檔改名為 themes.json.bak'; await loadMarket(); }
-  catch(e){ $('mk-theme-msg').textContent=e.message; }
+  var b=this;
+  if(!resetArmed){ b.textContent='確定還原？再按一次'; resetArmed=setTimeout(function(){resetArmed=null;b.textContent='↺ 還原預設';},4000); return; }
+  clearTimeout(resetArmed); resetArmed=null; b.textContent='↺ 還原預設';
+  try{ var j=await api('/api/themes/reset',{}); themes=j.themes; themeNames=j.names||themeNames; $('mk-theme-state').textContent='（預設範例）';
+       drawThemes(); themeMsg('已恢復預設；原本的自訂檔改名為 themes.json.bak'); await loadMarket(); }
+  catch(e){ themeMsg(e.message,true); }
 });
 $('mk-alert-form').addEventListener('submit',async function(e){
   e.preventDefault();

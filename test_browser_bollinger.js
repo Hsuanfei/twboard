@@ -38,7 +38,9 @@ server.serve_forever()
   const codes=()=>page.locator('[data-compare-row]').evaluateAll(ns=>ns.map(n=>n.dataset.compareRow));
   const names=()=>page.evaluate(()=>echarts.getInstanceByDom(document.getElementById('k1')).getOption().series.map(s=>s.name));
   assert.deepStrictEqual(await codes(),['SQ','UP','DOWN','FLAT','SHORT']);
-  assert((await names()).includes('布林上軌'));assert((await names()).includes('通道填色'));
+  // 0928a：主K線圖預設關閉布林通道（圖面較乾淨），按鈕打開後才畫
+  assert(!(await names()).includes('布林上軌'));assert(await page.locator('#bb-info').isHidden());assert.equal(await page.locator('#btn-bb').getAttribute('aria-pressed'),'false');
+  await page.locator('#btn-bb').click();assert((await names()).includes('布林上軌'));assert((await names()).includes('通道填色'));
   await page.locator('#btn-bb').click();assert(!(await names()).includes('布林上軌'));assert(await page.locator('#bb-info').isHidden());
   await page.locator('[data-compare-row=UP] button').click();assert.equal(await page.locator('#btn-bb').getAttribute('aria-pressed'),'false');
   await page.locator('#btn-bb').click();assert((await page.locator('#bb-info').innerText()).includes('今日突破上軌'));
@@ -63,8 +65,8 @@ server.serve_forever()
   const csv=fs.readFileSync(path.join(out,'bollinger.csv'),'utf8');assert(csv.includes('布林上軌2σ'));assert(csv.includes('價格報酬（不含息）'));
   waiting=page.waitForEvent('download');await page.locator('#dl-html').click();d=await waiting;await d.saveAs(path.join(out,'bollinger.html'));
   const offline=await ctx.newPage();offline.on('pageerror',e=>errors.push(e.message));await offline.route(/^https?:/,r=>r.abort());
-  await offline.goto('file:///'+path.join(out,'bollinger.html').replace(/\\/g,'/'));assert((await offline.locator('#bb-info').innerText()).includes('今日突破上軌'));
-  await offline.locator('#btn-bb').click();assert(await offline.locator('#bb-info').isHidden());await offline.locator('#btn-bb').click();
+  await offline.goto('file:///'+path.join(out,'bollinger.html').replace(/\\/g,'/'));assert(await offline.locator('#bb-info').isHidden());
+  await offline.locator('#btn-bb').click();assert((await offline.locator('#bb-info').innerText()).includes('今日突破上軌'));await offline.locator('#btn-bb').click();assert(await offline.locator('#bb-info').isHidden());
   waiting=offline.waitForEvent('download');await offline.locator('#btn-main-png').click();d=await waiting;await d.saveAs(path.join(out,'bollinger.png'));assert(fs.statSync(path.join(out,'bollinger.png')).size>10000);
   await offline.locator('.analysis-tabs [data-view=raw]').click();assert((await offline.locator('#rawtab').innerText()).includes('布林%B'));await offline.close();
   await page.setViewportSize({width:390,height:900});await page.waitForTimeout(200);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));

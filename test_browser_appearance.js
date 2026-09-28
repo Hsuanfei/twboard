@@ -34,12 +34,13 @@ server.serve_forever()
   page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(r.url().endsWith('/api/jobs'))jobs++;});
   const out=path.join(__dirname,'qa-20260924a-appearance');fs.mkdirSync(out,{recursive:true});
   await page.goto('http://127.0.0.1:'+port);await page.locator('#f-code').fill('2330,MISS');await page.locator('#btn-go').click();await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('完成 2 / 2'));
-  assert((await page.title()).includes('20260925c'));
+  assert((await page.title()).includes('0928a'));
   const open=()=>page.locator('#chart-dialog').evaluate(n=>n.open);
   const dimensions=()=>page.locator('#k1').evaluate(n=>({w:n.clientWidth,h:n.clientHeight}));
   const size=await dimensions();
   await page.locator('#k1').click({position:{x:100,y:100}});assert(await open());
-  assert((await dimensions()).w>size.w);assert((await dimensions()).h>size.h);
+  // 0928a：主K線圖本來就整列寬，放大後主要是變高（寬度不縮水）
+  assert((await dimensions()).w>=size.w*0.9);assert((await dimensions()).h>size.h*1.2);
   assert.equal(await page.locator('#zoom-host #k1').count(),1);
   await page.screenshot({path:path.join(out,'enlarged-desktop.png')});
   await page.locator('#k1').click({position:{x:100,y:100}});assert(!(await open()));assert.deepStrictEqual(await dimensions(),size);
