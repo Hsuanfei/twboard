@@ -418,3 +418,9 @@ html[data-large-font] #analysis-grid .c1 #k1{height:600px;min-height:0}
   .kp-more::before{content:'▸ ';color:var(--muted)}.k-pats.open .kp-more::before{content:'▾ '}
   .k-pats:not(.open) .kp,.k-pats:not(.open) .kp-actions{display:none}}
 @media print{.k-tools,.k-pats{display:none}#analysis-grid .c1 #k1{height:460px}}
+
+/* ===== 0930a：資料 Excel（全部股票一次下載） ===== */
+button.btn.dl-main{border-color:#4f74c9;color:#fff;background:#23345a}
+button.btn.dl-main:hover{background:#2c4172}
+button.btn:disabled{opacity:.45;cursor:default}
+.compare-actions{flex-wrap:wrap}

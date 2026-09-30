@@ -49,6 +49,7 @@ import twboard as T
 import twmacro as M
 import twcompare as C
 import twmarket as MK
+import twxlsx
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CACHE_TTL = 600           # 原始資料快取秒數
@@ -457,19 +458,20 @@ def delete_group(name):
     return groups
 
 
-def to_csv(d):
-    s = d["series"]
-    cols = [("日期", "date"), ("開盤", "open"), ("最高", "high"), ("最低", "low"),
-            ("收盤", "close"), ("成交量(張)", "vol"),
-            ("MA5", "ma5"), ("MA10", "ma10"), ("MA20", "ma20"), ("MA60", "ma60"),
-            ("K", "k"), ("D", "d"), ("RSI14", "rsi"),
-            ("ADX14", "adx"), ("+DI14", "plus_di"), ("-DI14", "minus_di"),
-            ("布林中軌20", "bb_mid"), ("布林上軌2σ", "bb_upper"), ("布林下軌2σ", "bb_lower"),
-            ("布林%B", "bb_percent_b"), ("布林寬度%", "bb_width"), ("寬度120日百分位", "bb_width_rank"),
-            ("MACD_DIF", "dif"), ("MACD訊號", "sig"), ("MACD_OSC", "osc"),
-            ("外資(張)", "chip_foreign"), ("投信(張)", "chip_trust"),
-            ("自營商(張)", "chip_dealer"), ("三大法人(張)", "chip_total")]
-    metadata = [("資料來源", d["source"]), ("產生時間", d["generated"]),
+DATA_COLS = [("日期", "date"), ("開盤", "open"), ("最高", "high"), ("最低", "low"),
+             ("收盤", "close"), ("成交量(張)", "vol"),
+             ("MA5", "ma5"), ("MA10", "ma10"), ("MA20", "ma20"), ("MA60", "ma60"),
+             ("K", "k"), ("D", "d"), ("RSI14", "rsi"),
+             ("ADX14", "adx"), ("+DI14", "plus_di"), ("-DI14", "minus_di"),
+             ("布林中軌20", "bb_mid"), ("布林上軌2σ", "bb_upper"), ("布林下軌2σ", "bb_lower"),
+             ("布林%B", "bb_percent_b"), ("布林寬度%", "bb_width"), ("寬度120日百分位", "bb_width_rank"),
+             ("MACD_DIF", "dif"), ("MACD訊號", "sig"), ("MACD_OSC", "osc"),
+             ("外資(張)", "chip_foreign"), ("投信(張)", "chip_trust"),
+             ("自營商(張)", "chip_dealer"), ("三大法人(張)", "chip_total")]
+
+
+def _metadata(d):
+    return [("資料來源", d["source"]), ("產生時間", d["generated"]),
                 ("股價最新日期", d["last_date"]),
                 ("法人最新日期", d["avail"]["chip_latest"]),
                 ("融資券最新日期", d["avail"]["margin_latest"]),
@@ -479,6 +481,12 @@ def to_csv(d):
                 ("除權息確認", (d.get("dividends") or {}).get("status", "unavailable")),
                 ("布林參數", "20日/2倍母體標準差"),
                 ("要求交易日數", d["avail"]["need_days"])]
+
+
+def to_csv(d):
+    s = d["series"]
+    cols = DATA_COLS
+    metadata = _metadata(d)
     buf = io.StringIO(newline="")
     buf.write("\ufeff")
     writer = csv.writer(buf)
@@ -486,6 +494,57 @@ def to_csv(d):
     for i in range(len(s["date"])):
         writer.writerow([s[k][i] for _, k in cols] + [m[1] for m in metadata])
     return buf.getvalue()
+
+
+def _patterns_by_date(d):
+    """主K線圖視窗內每天出現的 K 線型態名稱（Excel 的「K 線型態」欄）。"""
+    p, k = d.get("patterns") or {}, d.get("kline") or {}
+    names = {x["key"]: x["name"] for x in p.get("defs", [])}
+    dates = k.get("date") or []
+    out = {}
+    for e in p.get("events", []):
+        if 0 <= e["i"] < len(dates):
+            out.setdefault(dates[e["i"]], []).append(names.get(e["key"], e["key"]))
+    return out
+
+
+def to_xlsx(payloads):
+    """0930a：這次分析的全部股票放進同一個 Excel 檔：第一張「總覽」，之後每檔一張工作表。"""
+    def g(obj, *keys):
+        for key in keys:
+            obj = obj.get(key) if isinstance(obj, dict) else None
+        return obj
+    overview_cols = [("代號", 9), ("名稱", 14), ("市場", 7), ("股價最新日期", 12), ("收盤", 10), ("漲跌", 9), ("漲跌幅%", 9),
+                     ("成交量(張)", 12), ("綜合分", 8), ("技術分", 8), ("籌碼分", 8), ("研判", 18),
+                     ("法人近5日(張)", 13), ("法人近20日(張)", 13), ("相對大盤20日(點)", 13),
+                     ("布林%B", 9), ("布林寬度%", 10), ("ADX14", 8), ("最近 K 線型態", 22),
+                     ("顯示天數", 8), ("法人最新日期", 12), ("融資券最新日期", 13), ("除權息確認", 10), ("大盤基準", 18), ("資料來源", 12)]
+    status = {"confirmed": "已確認", "unavailable": "未取得"}
+    rows, sheets = [], []
+    for d in payloads:
+        pat = _patterns_by_date(d)
+        recent = [dt_ + " " + "、".join(v) for dt_, v in sorted(pat.items())[-3:]]
+        rows.append([d["code"], d.get("name"), {"twse": "上市", "tpex": "上櫃"}.get(d.get("market"), d.get("market") or ""),
+                     d["last_date"], g(d, "quote", "close"), g(d, "quote", "chg"), g(d, "quote", "chg_pct"),
+                     g(d, "quote", "vol"), g(d, "scores", "overall"), g(d, "scores", "tech"), g(d, "scores", "chip"),
+                     g(d, "plan", "verdict"), g(d, "chip", "net5"), g(d, "chip", "net20"), g(d, "bench", "d20", "rs"),
+                     g(d, "bollinger", "percent_b"), g(d, "bollinger", "width"), g(d, "dmi", "adx"),
+                     "；".join(recent) or "—", d.get("bars_count"), g(d, "avail", "chip_latest"),
+                     g(d, "avail", "margin_latest"), status.get(g(d, "dividends", "status") or "unavailable", g(d, "dividends", "status")),
+                     g(d, "bench", "name") or "未取得", d.get("source")])
+        s = d["series"]
+        header = [c[0] for c in DATA_COLS] + ["K 線型態"]
+        data = [[s[k][i] for _, k in DATA_COLS] + ["、".join(pat.get(s["date"][i], []))] for i in range(len(s["date"]))]
+        sheets.append({"name": "%s %s" % (d["code"], d.get("name") or ""), "header": header, "rows": data,
+                       "widths": [12] + [10] * (len(DATA_COLS) - 1) + [20],
+                       "notes": ["%s：%s" % (k, "" if v is None else status.get(v, v) if k == "除權息確認" else v)
+                                 for k, v in _metadata(d)]})
+    app = T.APP_TITLE
+    overview = {"name": "總覽", "header": [c[0] for c in overview_cols], "rows": rows, "widths": [c[1] for c in overview_cols],
+                "notes": ["%s　產生時間 %s　共 %d 檔；每檔的日K與指標在後面各自的工作表（顯示分析天數內的交易日）。"
+                          % (app, time.strftime("%Y-%m-%d %H:%M"), len(payloads)),
+                          "分數都是規則計分，不是勝率也不是投資建議；價格未還原，報酬為價格報酬（不含息）。空白＝資料不足或未取得。"]}
+    return twxlsx.workbook([overview] + sheets, title=app, author=T.APP_CREDIT)
 
 
 def export_strategy(q):
@@ -784,6 +843,16 @@ class Handler(BaseHTTPRequestHandler):
                                     "text/html; charset=utf-8", html,
                                     "%s_board.html" % d["code"])
 
+            if path.startswith("/api/xlsx"):
+                ids = [x for x in q.get("snapshots", [""])[0].split(",") if x][:10]
+                if not ids:
+                    raise ValueError("沒有可以下載的股票，請先產生圖表。")
+                payloads = [get_snapshot({"snapshot": [i]}) for i in ids]
+                day = max(p["last_date"] for p in payloads)
+                return self._attach("個股資料_%s_%d檔.xlsx" % (day, len(payloads)),
+                                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    to_xlsx(payloads), "twboard_data_%s.xlsx" % day)
+
             if path.startswith("/api/csv"):
                 d = get_snapshot(q)
                 return self._attach("%s_%s_資料.csv" % (d["code"], d["name"]),
@@ -820,7 +889,7 @@ def main():
     globals()["DEMO_MODE"] = a.demo
 
     for f in ("twboard.py", "board_app.html", "board.css", "board_body.html", "board.js", "board_template.html",
-              "twcache.py", "twmacro.py", "twmarket.py", "twpattern.py", "glossary.js", "market.js"):
+              "twcache.py", "twmacro.py", "twmarket.py", "twpattern.py", "twxlsx.py", "glossary.js", "market.js"):
         if not os.path.exists(os.path.join(HERE, f)):
             raise SystemExit("缺少檔案 %s，請確認所有檔案都放在同一個資料夾。" % f)
 

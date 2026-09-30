@@ -30,7 +30,8 @@
     <div class="ctrls">
       <label class="font-choice">字體 <select id="font-size" aria-label="字體大小"><option value="1">標準</option><option value="1.15">大</option><option value="1.3">特大</option></select></label>
       <button class="btn" id="btn-main-png" type="button">↓ 主K線 PNG</button>
-      <button class="btn live-only" id="dl-csv" data-download="csv" type="button">↓ 資料 CSV</button>
+      <button class="btn live-only dl-main" id="dl-xlsx" data-download="xlsx" type="button" title="一次下載這次分析的全部股票：第一張是總覽，之後每檔一張工作表">↓ 資料 Excel（全部）</button>
+      <button class="btn live-only" id="dl-csv" data-download="csv" type="button" title="只下載目前這一檔的 CSV">↓ 本檔 CSV</button>
       <button class="btn live-only" id="dl-html" data-download="export" type="button">↓ 戰略報告 HTML</button>
       <button class="btn live-only" id="btn-paper" type="button" title="以最新收盤價記錄一筆模擬買進">＋ 模擬買進</button>
       <button class="btn live-only" id="btn-alert" type="button" title="設定這檔的上下限價提醒">設定到價警示</button>

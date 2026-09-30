@@ -577,7 +577,7 @@ button.mk-scan:disabled{opacity:.6;cursor:progress}
   <section class="compare" id="comparison" aria-labelledby="compare-title" hidden>
     <div class="compare-head">
       <h2 id="compare-title">自選股比較表<span class="compare-count" id="compare-count" role="status"></span></h2>
-      <div class="compare-actions"><button class="btn" id="compare-toggle" type="button" aria-expanded="true">收合比較表</button>
+      <div class="compare-actions"><button class="btn dl-main" id="compare-xlsx" type="button" disabled>↓ 全部資料 Excel</button><button class="btn" id="compare-toggle" type="button" aria-expanded="true">收合比較表</button>
       <button class="btn" id="compare-reset" type="button">恢復輸入順序</button></div>
     </div>
     <div class="compare-filters">
@@ -917,7 +917,7 @@ $('filter-export').addEventListener('click',function(){
       comparisonNotes(d).join(' · ')||'資料齊全',d.source,d.dmi?d.dmi.adx:null,d.dmi?d.dmi.plus_di:null,d.dmi?d.dmi.minus_di:null,d.volume_analysis?d.volume_analysis.state:'',d.score_model,condition,exported]);
   });
   var url=URL.createObjectURL(new Blob(['\uFEFF'+rows.map(function(row){return row.map(comparisonCsvCell).join(',');}).join('\r\n')+'\r\n'],{type:'text/csv;charset=utf-8'}));
-  var a=document.createElement('a');a.href=url;a.download='自選股篩選_0928a_'+exported.slice(0,10)+'.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url);},1000);
+  var a=document.createElement('a');a.href=url;a.download='自選股篩選_0930a_'+exported.slice(0,10)+'.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url);},1000);
   $('preset-msg').textContent='已匯出 '+codes.length+' 檔，依目前表格排序；未完成或失敗的股票不列入。';
 });
 function drawComparison(){
@@ -1006,6 +1006,34 @@ function drawChips(){
   }).join('');
   $('chips').innerHTML = html;
   drawComparison();
+  syncXlsx();
+}
+
+/* 0930a：這次分析的全部股票一次下載成 Excel，每檔一張工作表 */
+function readyCodes(){ return order.filter(function(c){ return results[c] && results[c]!=='FAIL'; }); }
+function syncXlsx(){
+  var n=readyCodes().length, wait=order.filter(function(c){ return !(c in results); }).length;
+  var tip=n?('一次下載 '+readyCodes().join('、')+'：第一張是總覽，之後每檔一張工作表'+(wait?'（還有 '+wait+' 檔讀取中，完成後再下載會包含在內）':'')):'先產生圖表才能下載';
+  var b=$('dl-xlsx');
+  if(b){ b.disabled=!n; b.textContent='↓ 資料 Excel（'+(n>1?'全部 '+n+' 檔':n===1?'1 檔':'全部')+'）'; b.title=tip; }
+  var c=$('compare-xlsx');
+  if(c){ c.disabled=!n; c.textContent='↓ 全部資料 Excel'+(n?'（'+n+' 檔）':''); c.title=tip; }
+}
+async function dlXlsx(){
+  var codes=readyCodes();
+  if(!codes.length) return;
+  var wait=order.filter(function(c){ return !(c in results); }).length;
+  try{
+    var ids=codes.map(function(c){ return results[c].snapshot_id; });
+    var r=await fetch('/api/xlsx?snapshots='+encodeURIComponent(ids.join(',')));
+    if(!r.ok){ var error=await r.json(); throw new Error(error.error||'下載失敗'); }
+    var day=codes.map(function(c){ return results[c].last_date; }).sort().pop();
+    var url=URL.createObjectURL(await r.blob());
+    var a=document.createElement('a'); a.href=url; a.download='個股資料_'+day+'_'+codes.length+'檔.xlsx';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){URL.revokeObjectURL(url);},60000);
+    status('已下載 '+codes.length+' 檔的 Excel（'+codes.join('、')+'）'+(wait?'；還有 '+wait+' 檔讀取中，沒有包含在內':''),'ok');
+  }catch(err){ status('下載失敗：'+err.message,'err'); }
 }
 
 async function dl(kind){
@@ -1031,8 +1059,11 @@ document.addEventListener('click', function(e){
   if(chip.dataset.ex){ $('f-code').value = chip.dataset.ex; $('form').requestSubmit(); return; }
   if(chip.id === 'dl-html'){ dl('export'); return; }
   if(chip.id === 'dl-csv'){ dl('csv'); return; }
+  if(chip.id === 'dl-xlsx'){ dlXlsx(); return; }
   if(chip.dataset.code) show(chip.dataset.code);
 });
+
+$('compare-xlsx').addEventListener('click', dlXlsx);
 
 $('a-reset').addEventListener('click', async function(){
   if(busy) return;

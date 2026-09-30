@@ -64,7 +64,7 @@ import zlib
 import twcache as TC
 import twpattern as TP
 
-APP_VERSION = "0928a"
+APP_VERSION = "0930a"
 APP_TITLE = "台股戰略產生器%s版" % APP_VERSION
 APP_CREDIT = "Powered by 黃炫斐(Mick Huang)"
 APP_COPYRIGHT = "Copyright (C) 2026 黃炫斐 (Mick Huang)"
