@@ -81,7 +81,7 @@ class CacheTests(unittest.TestCase):
         folder = fresh_cache()
         C.write("recent-market", {"": {"a": 1}}, kind="market-day")
         C.write("old-market", {"": {"a": 1}}, kind="market-day")
-        C.write("series", {"2020-01-01": [], C.today().isoformat(): []})
+        C.write("series", {"2014-01-01": [], C.today().isoformat(): []})   # 超過 10 年才清掉
         con = sqlite3.connect(str(folder / "market.sqlite3"))
         con.execute("UPDATE cache SET fetched=? WHERE key='old-market'", (time.time() - 300 * 86400,))
         con.commit(); con.close()

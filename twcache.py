@@ -191,6 +191,20 @@ def write(key, values, kind=""):
         warn("本次資料已取得，但無法寫入本機快取。")
 
 
+def write_many(items, kind=""):
+    """一次寫入多個鍵（[(key, day, value), ...]），同一個交易；集保每週全市場摘要一次寫幾千檔用。"""
+    try:
+        stamp = time.time()
+        rows = [(k, d, json.dumps(v, ensure_ascii=False, allow_nan=False, separators=(",", ":")), stamp, kind)
+                for k, d, v in items]
+        with _io_lock, database() as con:
+            con.executemany("INSERT OR REPLACE INTO cache (key,day,payload,fetched,kind) VALUES (?,?,?,?,?)", rows)
+        return True
+    except (OSError, sqlite3.Error, ValueError):
+        warn("本次資料已取得，但無法寫入本機快取。")
+        return False
+
+
 def dates(start, end):
     d, stop = dt.date.fromisoformat(start), dt.date.fromisoformat(end)
     while d <= stop:
@@ -303,7 +317,7 @@ def adopt(new_key, old_keys):
 
 
 MARKET_DAY_KEEP = 200      # 證交所「全市場單日」資料保留天數（法人／融資券最多只回看 60 個交易日）
-GENERAL_KEEP = 1100        # 其他資料保留天數（顯示 500 日＋暖身約需 960 個日曆天）
+GENERAL_KEEP = 3800        # 其他資料保留天數：K 線型態、填息、季節性要用近 10 年日K（0930b 起由 1100 天放寬）
 PRUNE_EVERY = 86400
 
 

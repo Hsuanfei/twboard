@@ -36,7 +36,7 @@ const num=t=>Number(String(t).replace(/[^\d.+-]/g,''));
     // 驗證失敗（400）是本測試故意觸發的，其他 console 錯誤都要算
     page.on('console',m=>{if(m.type()==='error'&&!/status of 400/.test(m.text()))errors.push(m.text());});
     await page.goto(base);
-    assert((await page.locator('h1').innerText()).includes('0930a'));
+    assert((await page.locator('h1').innerText()).includes('0930b'));
     await page.waitForFunction(()=>document.querySelector('#mk-meta').textContent.includes('尚未掃描'));
     assert.equal(await page.locator('#mk-scan').innerText(),'開始掃描');
     assert((await page.locator('#mk-note').innerText()).includes('第一次'));

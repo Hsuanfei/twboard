@@ -34,7 +34,7 @@ server.serve_forever()
   page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(r.url().endsWith('/api/jobs'))jobs++;});
   const out=path.join(__dirname,'qa-20260924a-appearance');fs.mkdirSync(out,{recursive:true});
   await page.goto('http://127.0.0.1:'+port);await page.locator('#f-code').fill('2330,MISS');await page.locator('#btn-go').click();await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('完成 2 / 2'));
-  assert((await page.title()).includes('0930a'));
+  assert((await page.title()).includes('0930b'));
   const open=()=>page.locator('#chart-dialog').evaluate(n=>n.open);
   const dimensions=()=>page.locator('#k1').evaluate(n=>({w:n.clientWidth,h:n.clientHeight}));
   const size=await dimensions();

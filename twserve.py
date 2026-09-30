@@ -49,6 +49,7 @@ import twboard as T
 import twmacro as M
 import twcompare as C
 import twmarket as MK
+import twpower as P
 import twxlsx
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -215,6 +216,40 @@ def get_macro(q):
         _macro_cache[key] = {"data": data, "ts": now, "ttl": WARN_TTL if data["warnings"] else MACRO_TTL}
         while len(_macro_cache) > 8:
             _macro_cache.pop(next(iter(_macro_cache)))
+    return data
+
+
+_power_cache = OrderedDict()   # (代號, 分頁, …) -> {"data", "ts", "ttl"}
+POWER_TTL = 600
+
+
+def get_power(q):
+    """強力分析的一個分頁。十分鐘內重複開同一頁直接回記憶體；「重抓」會重新確認近 7 日資料。"""
+    code = _clean_code(q.get("code", [""])[0])
+    part = q.get("part", ["risk"])[0]
+    if part not in P.PART_KEYS:
+        raise ValueError("未知的分析項目")
+    extra = P.clean_us(q.get("us", [""])[0]) if part == "us" else []
+    refresh = q.get("refresh", ["0"])[0] == "1"
+    yahoo = q.get("yahoo", ["0"])[0] == "1"
+    ep = _ep_from(q)
+    with _lock:
+        token = DEFAULT_TOKEN if SESSION_TOKEN is None else SESSION_TOKEN
+    key = (code, part, tuple(extra), ep["finmind"], ep["stooq"], yahoo, DEMO_MODE,
+           hashlib.sha256(token.encode()).hexdigest())
+    now = time.time()
+    with _lock:
+        hit = _power_cache.get(key)
+    if hit and not refresh and now - hit["ts"] < hit["ttl"]:
+        return hit["data"]
+    with T.TC.operation():
+        data = P.build(code, part, token, dict(ep, _yahoo=yahoo), demo=DEMO_MODE, us_extra=extra, refresh=refresh)
+        data["warnings"] = T.TC.public_info()["warnings"]
+        data["network_requests"] = T.TC.public_info()["network_requests"]
+    with _lock:
+        _power_cache[key] = {"data": data, "ts": now, "ttl": WARN_TTL if data["warnings"] else POWER_TTL}
+        while len(_power_cache) > 96:
+            _power_cache.popitem(last=False)
     return data
 
 
@@ -804,6 +839,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True, "data": get_macro(q)})
             if path == "/api/market":
                 return self._json({"ok": True, "data": get_market(q)})
+            if path == "/api/power":
+                return self._json({"ok": True, "data": get_power(q)})
             if path == "/api/themes":
                 themes, custom = MK.load_themes()
                 return self._json({"ok": True, "themes": themes, "custom": custom, "names": theme_names(themes)})
@@ -889,7 +926,8 @@ def main():
     globals()["DEMO_MODE"] = a.demo
 
     for f in ("twboard.py", "board_app.html", "board.css", "board_body.html", "board.js", "board_template.html",
-              "twcache.py", "twmacro.py", "twmarket.py", "twpattern.py", "twxlsx.py", "glossary.js", "market.js"):
+              "twcache.py", "twmacro.py", "twmarket.py", "twpattern.py", "twpower.py", "twxlsx.py", "glossary.js", "market.js",
+              "power.js"):
         if not os.path.exists(os.path.join(HERE, f)):
             raise SystemExit("缺少檔案 %s，請確認所有檔案都放在同一個資料夾。" % f)
 
