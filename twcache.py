@@ -3,6 +3,8 @@
 # 本檔案是「台股戰略產生器」的一部分：自由軟體，依 GNU GPL 第 3 版釋出，不附任何擔保，詳見 LICENSE。
 # 匯出的報告另有額外許可，見 LICENSE-EXCEPTION.md。
 """本機增量資料快取；只存成功回應的資料，不存 Token 或請求網址。"""
+import atexit
+import types
 import contextlib
 import datetime as dt
 import hashlib
@@ -20,7 +22,7 @@ RECENT_DAYS = 7
 _local = threading.local()
 _io_lock = threading.RLock()
 _state_lock = threading.Lock()      # 平行抓取時多執行緒共用同一份進度狀態
-_conn_local = threading.local()     # 每個執行緒重用一條 sqlite 連線，不必每次開檔
+_conn_local = types.SimpleNamespace()     # 在 _io_lock 內重用一條 sqlite 連線
 _adopted = set()                    # 本次程序已搬過的舊快取鍵，不必每次查詢都再檢查一次
 _key_locks = {}                     # 同一個資料鍵同時只讓一個執行緒抓（多檔同時要大盤指數時只抓一次）
 
@@ -132,7 +134,7 @@ def key_for(*values):
 
 
 def _connect():
-    """每個執行緒一條長期連線；快取目錄或檔案換了就重開。"""
+    """共用一條長期連線；快取目錄換了先關閉舊連線。"""
     path = str(CACHE_DIR / "market.sqlite3")
     con = getattr(_conn_local, "con", None)
     if con is not None and getattr(_conn_local, "path", None) == path:
@@ -144,6 +146,7 @@ def _connect():
                 con.close()
             except sqlite3.Error:
                 pass
+    close_cache()
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(path, timeout=20, check_same_thread=False)
     try:
@@ -151,23 +154,41 @@ def _connect():
         con.execute("PRAGMA synchronous=NORMAL")
     except sqlite3.Error:
         pass
-    con.execute("CREATE TABLE IF NOT EXISTS cache (key TEXT, day TEXT, payload TEXT NOT NULL, fetched REAL NOT NULL, PRIMARY KEY(key,day))")
-    if "kind" not in [r[1] for r in con.execute("PRAGMA table_info(cache)")]:
-        con.execute("ALTER TABLE cache ADD COLUMN kind TEXT NOT NULL DEFAULT ''")
-    con.commit()
+    try:
+        con.execute("CREATE TABLE IF NOT EXISTS cache (key TEXT, day TEXT, payload TEXT NOT NULL, fetched REAL NOT NULL, PRIMARY KEY(key,day))")
+        if "kind" not in [r[1] for r in con.execute("PRAGMA table_info(cache)")]:
+            con.execute("ALTER TABLE cache ADD COLUMN kind TEXT NOT NULL DEFAULT ''")
+        con.commit()
+    except Exception:
+        con.close()
+        raise
     _conn_local.con, _conn_local.path = con, path
     return con
 
 
+def close_cache():
+    """關閉快取連線；切換目錄、清理測試與程序退出時釋放 Windows 檔案鎖。"""
+    with _io_lock:
+        con = getattr(_conn_local, "con", None)
+        _conn_local.con, _conn_local.path = None, None
+        if con is not None:
+            con.close()
+
+
+atexit.register(close_cache)
+
+
 @contextlib.contextmanager
 def database():
-    con = _connect()
-    try:
-        yield con
-        con.commit()
-    except Exception:
-        con.rollback()
-        raise
+    # 讀寫原本即受同一把鎖保護；共用一條連線避免短命工作執行緒留下連線。
+    with _io_lock:
+        con = _connect()
+        try:
+            yield con
+            con.commit()
+        except Exception:
+            con.rollback()
+            raise
 
 
 def read(key, start="", end="9999-12-31"):

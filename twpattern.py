@@ -163,21 +163,17 @@ def pivots(h, l, k=PIVOT_K):
 
 
 def head_shoulders(h, l, c):
-    """頭肩頂／頭肩底。回傳 [{key, points:[(i,價)×5], neck:(i1,y1,i2,y2), break, confirmed}]。
+    """逐日確認轉折與頸線；已確認訊號不因未來轉折重繪。
 
-    確認：右肩之後 HS_WAIT 根內，收盤跌破（頭肩頂）或突破（頭肩底）頸線。
-    未確認：資料到今天為止還在等待，而且價格沒有超過頭部（超過就不再是這個型態）。
+    轉折需右側 PIVOT_K 根才可知，統計起點是可知後首次仍突破頸線的收盤。
     """
     n = len(c)
-    seq = pivots(h, l)
-    out = []
-    idx = 0
-    while idx + 4 < len(seq):
-        five = seq[idx:idx + 5]
+    seq, active, out, seen = [], [], [], set()
+
+    def candidate(five):
         kinds = "".join(p[1] for p in five)
         if kinds not in ("PTPTP", "TPTPT"):
-            idx += 1
-            continue
+            return None
         top = kinds == "PTPTP"
         (ls_i, _, ls), (t1_i, _, t1), (hd_i, _, hd), (t2_i, _, t2), (rs_i, _, rs) = five
         sign = 1 if top else -1
@@ -193,31 +189,56 @@ def head_shoulders(h, l, c):
               and all(five[j + 1][0] - five[j][0] >= 3 for j in range(4))
               and 0.4 <= (rs_i - hd_i) / max(1, hd_i - ls_i) <= 2.5)
         if not ok:
-            idx += 1
-            continue
-        slope = (t2 - t1) / (t2_i - t1_i)
+            return None
+        return {"key": "hs_top" if top else "hs_bottom", "top": top,
+                "points": [(p[0], p[2]) for p in five], "head": hd,
+                "t1": t1_i, "y1": t1, "slope": (t2 - t1) / (t2_i - t1_i),
+                "right": rs_i, "known": rs_i + PIVOT_K}
 
-        def neck(j):
-            return t1 + slope * (j - t1_i)
-        brk, invalid = None, False
-        last = min(n - 1, rs_i + HS_WAIT)
-        for j in range(rs_i + 1, last + 1):
-            if (c[j] < neck(j)) if top else (c[j] > neck(j)):
-                brk = j
-                break
-            if (h[j] > hd) if top else (l[j] < hd):
-                invalid = True
-                break
-        pending = brk is None and not invalid and rs_i + HS_WAIT > n - 1
-        if brk is not None or pending:
-            end = brk if brk is not None else n - 1
-            out.append({"key": "hs_top" if top else "hs_bottom",
-                        "points": [(p[0], p[2]) for p in five],
-                        "neck": (t1_i, t1, end, neck(end)),
-                        "break": brk, "confirmed": brk is not None})
-            idx += 4
-        else:
-            idx += 1
+    def finish(x, end, confirmed):
+        return {"key": x["key"], "points": x["points"],
+                "neck": (x["t1"], x["y1"], end, x["y1"] + x["slope"] * (end - x["t1"])),
+                "break": end if confirmed else None, "confirmed": confirmed,
+                "known": x["known"]}
+
+    for t in range(n):
+        i = t - PIVOT_K
+        if i >= PIVOT_K:
+            peak = h[i] == max(h[i-PIVOT_K:t+1]) and h[i] > h[i-1]
+            trough = l[i] == min(l[i-PIVOT_K:t+1]) and l[i] < l[i-1]
+            if peak != trough:
+                p = (i, "P" if peak else "T", h[i] if peak else l[i])
+                changed = False
+                if seq and seq[-1][1] == p[1]:
+                    if (p[2] > seq[-1][2]) if peak else (p[2] < seq[-1][2]):
+                        seq[-1] = p
+                        changed = True
+                else:
+                    seq.append(p)
+                    changed = True
+                if changed and len(seq) >= 5:
+                    x = candidate(seq[-5:])
+                    signature = tuple(p[0] for p in seq[-5:])
+                    if x and signature not in seen:
+                        seen.add(signature)
+                        # Confirming the right shoulder must not overlook prior invalidation.
+                        invalid = any((h[j] > x["head"]) if x["top"] else (l[j] < x["head"])
+                                      for j in range(x["right"] + 1, t + 1))
+                        if not invalid:
+                            active.append(x)
+        pending = []
+        for x in active:
+            invalid = h[t] > x["head"] if x["top"] else l[t] < x["head"]
+            if invalid or t > x["right"] + HS_WAIT:
+                continue
+            neck = x["y1"] + x["slope"] * (t - x["t1"])
+            broken = c[t] < neck if x["top"] else c[t] > neck
+            if broken:
+                out.append(finish(x, t, True))
+            else:
+                pending.append(x)
+        active = pending
+    out.extend(finish(x, n - 1, False) for x in active if n - 1 < x["right"] + HS_WAIT)
     return out
 
 
@@ -259,7 +280,7 @@ def analyse(date, o, h, l, c, window=250):
         if x["confirmed"]:
             found[x["key"]].append(x["break"])
     for k in found:
-        found[k].sort()
+        found[k] = sorted(set(found[k]))
 
     def fwd(i, hz):
         return _r((c[i + hz] / c[i] - 1) * 100.0) if i + hz < n and c[i] > 0 else None

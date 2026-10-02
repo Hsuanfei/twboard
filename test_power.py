@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 黃炫斐 (Mick Huang)
 # 本檔案是「台股戰略產生器」的一部分：自由軟體，依 GNU GPL 第 3 版釋出，不附任何擔保，詳見 LICENSE。
-"""0930b 強力分析：九個分頁的計算、FinMind／集保欄位解析、快取與 /api/power。"""
+"""1002a 強力分析：九個分頁的計算、FinMind／集保欄位解析、快取與 /api/power。"""
 import datetime as dt
 import json
 import math
@@ -85,7 +85,7 @@ class SplitTests(unittest.TestCase):
         # 第 4 根一拆四（188 → 47），之後又漲回 50；第 2 根除息
         bars = make_bars([180, 188, 186, 188, 47, 48, 50])
         divs = [{"date": bars[2]["date"], "kind": "除息", "amount": 4.0, "before": 188.0, "after": 184.0}]
-        adj, adivs, sp = P.adjust_for_splits(bars, divs)
+        adj, adivs, sp = P.adjust_for_splits(bars, divs, [{"date": bars[4]["date"], "before": 188, "reference": 47}])
         self.assertEqual(sp, [{"date": bars[4]["date"], "ratio": 4.0}])
         self.assertEqual([round(b["close"], 2) for b in adj], [45, 47, 46.5, 47, 47, 48, 50])
         self.assertEqual(adj[0]["vol"], 4000.0, "分割前的成交量換算成新股數")

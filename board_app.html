@@ -313,7 +313,7 @@ button.mk-scan:disabled{opacity:.6;cursor:progress}
 @media(max-width:700px){.market{padding:10px}.mk-ctrl{width:100%}.mk-ctrl label{flex:1 1 140px}.mk-ctrl select{width:100%}.mk-chart{height:380px}.mk-theme{grid-template-columns:minmax(0,1fr) 36px}.mk-theme .mk-te-codes{grid-column:1/-1;grid-row:2}.mk-views button{padding:7px 10px;font-size:calc(12px * var(--font-scale,1))}.mk-form input{width:100%}.mk-form label{flex:1 1 140px}.mk-tabs button{padding:7px 8px}}
 @media print{.market{display:none}}
 
-/* ---------- 0930b：強力分析（九個分頁的深入分析，互動版專用） ---------- */
+/* ---------- 1002a：強力分析（九個分頁的深入分析，互動版專用） ---------- */
 html.pw-lock{overflow:hidden}
 .qn-links button.qn-power{color:#f2c94c;font-weight:700}
 dialog.power{width:min(1320px,97vw);height:min(960px,94vh);height:min(960px,94dvh);max-width:none;max-height:none;margin:auto;padding:0;border:1px solid #3b4d75;border-radius:14px;background:linear-gradient(180deg,#141a28,#10141e);color:var(--ink);overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.55)}
@@ -1033,7 +1033,7 @@ $('filter-export').addEventListener('click',function(){
       comparisonNotes(d).join(' · ')||'資料齊全',d.source,d.dmi?d.dmi.adx:null,d.dmi?d.dmi.plus_di:null,d.dmi?d.dmi.minus_di:null,d.volume_analysis?d.volume_analysis.state:'',d.score_model,condition,exported]);
   });
   var url=URL.createObjectURL(new Blob(['\uFEFF'+rows.map(function(row){return row.map(comparisonCsvCell).join(',');}).join('\r\n')+'\r\n'],{type:'text/csv;charset=utf-8'}));
-  var a=document.createElement('a');a.href=url;a.download='自選股篩選_0930b_'+exported.slice(0,10)+'.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url);},1000);
+  var a=document.createElement('a');a.href=url;a.download='自選股篩選_1002a_'+exported.slice(0,10)+'.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url);},1000);
   $('preset-msg').textContent='已匯出 '+codes.length+' 檔，依目前表格排序；未完成或失敗的股票不列入。';
 });
 function drawComparison(){
@@ -1185,6 +1185,7 @@ $('a-reset').addEventListener('click', async function(){
   if(busy) return;
   try{
     await post('/api/token', {token:''});
+    window.dispatchEvent(new Event('twboard-settings-changed'));
     $('a-token').value = '';
     ADV.forEach(function(p){ $(p[0]).value = ''; });
     var hadYahoo = $('a-yahoo').checked; $('a-yahoo').checked = false;
@@ -1212,6 +1213,7 @@ $('form').addEventListener('submit', async function(e){
   try{
     if($('a-token').value.trim()){
       await post('/api/token', {token:$('a-token').value.trim()});
+      window.dispatchEvent(new Event('twboard-settings-changed'));
       $('a-token').value = '';
     }
   }catch(err){

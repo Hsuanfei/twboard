@@ -3,7 +3,7 @@
 # 本檔案是「台股戰略產生器」的一部分：自由軟體，依 GNU GPL 第 3 版釋出，不附任何擔保，詳見 LICENSE。
 # 匯出的報告另有額外許可，見 LICENSE-EXCEPTION.md。
 """
-強力分析（0930b）：一檔股票的九個深入面向，每個分頁各自抓資料、各自計算。
+強力分析（1002a）：一檔股票的九個深入面向，每個分頁各自抓資料、各自計算。
 
     大戶持股  風險指標卡  美股連動  分價量  外資持股  借券／當沖  三率＋現金流  填息  季節性
 
@@ -204,7 +204,7 @@ def ex_bases(dividends):
     out = {}
     for d in dividends or []:
         before = d.get("before")
-        base = d.get("after") or d.get("reference")
+        base = d.get("reference") or d.get("after")
         if not ok(base) and ok(before) and ok(d.get("amount")):
             base = before - d["amount"]
         if ok(base) and base > 0 and (not ok(before) or 0.3 * before <= base <= before):
@@ -227,23 +227,30 @@ def daily_returns(bars, dividends=None):
 SPLIT_JUMP = 0.35          # 單日漲跌超過 35%（台股漲跌幅上限 10%）幾乎只可能是股票分割、減資這類公司行動
 
 
-def splits(bars, dividends=None):
-    """偵測股票分割／減資：[(第幾根 K 棒, 前後價格比)]，例如 0050 在 2025-06 一拆四 → (i, 4.0)。"""
-    bases = ex_bases(dividends)
-    out = []
-    for i in range(1, len(bars)):
-        c = bars[i]["close"]
-        base = bases.get(bars[i]["date"], bars[i - 1]["close"])
-        if ok(c) and ok(base) and c > 0 and base > 0 and abs(c / base - 1) > SPLIT_JUMP:
-            out.append((i, base / c))
-    return out
+def price_jumps(bars, dividends=None):
+    """異常跳價只是待確認訊號，不能當成分割比例。"""
+    return [d for d, r in daily_returns(bars, dividends) if abs(r) > SPLIT_JUMP]
 
 
-def adjust_for_splits(bars, dividends=None):
+def splits(bars, dividends=None, actions=None):
+    """僅採來源確認的分割／面額變更前價、參考價，保留當天真實漲跌。"""
+    by_date = {b["date"]: i for i, b in enumerate(bars)}
+    out = {}
+    for a in actions or []:
+        i = by_date.get(a.get("date"))
+        before, reference = a.get("before"), a.get("reference")
+        if (i is not None and i > 0 and ok(before) and ok(reference)
+                and before > 0 and reference > 0
+                and abs(bars[i - 1]["close"] / before - 1) < 0.02):
+            out[i] = before / reference
+    return sorted(out.items())
+
+
+def adjust_for_splits(bars, dividends=None, actions=None):
     """把分割／減資以前的價格換算成最新的單位（成交量反向換算），股價圖與報酬才不會出現假的斷崖。
 
     回傳 (換算後的 K 棒, 換算後的除權息, [{"date", "ratio"}])；除權息保留原始的權息值與除權息前價供表格顯示。"""
-    sp = splits(bars, dividends)
+    sp = splits(bars, dividends, actions)
     if not sp:
         return bars, dividends, []
     ratio = dict(sp)
@@ -744,23 +751,30 @@ def margins(quarters, keep=12):
 # 7. 填息
 # --------------------------------------------------------------------------
 
-def dividend_fill(bars, dividends):
+def dividend_fill(bars, dividends, trading_dates=None):
     events = sorted([d for d in dividends or [] if ok(d.get("before")) and d["before"] > 0 and ok(d.get("amount"))
                      and d["amount"] > 0], key=lambda d: d["date"])
     if not events:
         return unavailable("近 10 年查無除權息紀錄（或取不到除權息資料）。")
     dates = [b["date"] for b in bars]
     closes = [b["close"] for b in bars]
-    rows = []
+    rows, excluded = [], []
     for e in events:
         i = bisect.bisect_left(dates, e["date"])
-        if i >= len(dates):
+        if i == 0 or i >= len(dates) or dates[i] != e["date"]:
+            excluded.append({"date": e["date"], "reason": "缺少除權息日或之前的股價，歷史不足"})
             continue
         filled = None
         for k in range(i, len(dates)):
             if closes[k] >= e["before"] - 1e-9:
                 filled = k
                 break
+        end = filled if filled is not None else len(dates) - 1
+        if trading_dates is not None:
+            required = {d for d in trading_dates if e["date"] <= d <= dates[end]}
+            if not required or not required.issubset(set(dates[i:end + 1])):
+                excluded.append({"date": e["date"], "reason": "觀察期間有缺漏交易日，無法確認填息天數"})
+                continue
         elapsed = len(dates) - 1 - i
         kind = e.get("kind") or "除權息"
         row = {"date": e["date"], "kind": kind, "amount": rd(e.get("orig_amount") or e["amount"], 4),
@@ -774,9 +788,9 @@ def dividend_fill(bars, dividends):
                         "target": rd(e["before"])})
         rows.append(row)
     if not rows:
-        return unavailable("除權息日早於目前取得的股價資料，無法計算填息。")
+        return unavailable("歷史不足或觀察期間有缺漏，無法計算填息。", excluded=excluded)
     def rate(limit):
-        pool = [r for r in rows if r["filled"] or r["elapsed"] >= limit]
+        pool = [r for r in rows if r["elapsed"] >= limit]
         hit = [r for r in pool if r["filled"] and r["days"] <= limit]
         return (pc(len(hit) / len(pool), 0) if pool else None), len(pool)
     same, n0 = rate(0)
@@ -798,7 +812,7 @@ def dividend_fill(bars, dividends):
     return {
         "available": True, "headline": h, "count": len(rows), "first": rows[0]["date"][:4], "last": rows[-1]["date"][:4],
         "same_day": same, "same_n": n0, "within20": r20, "n20": n20, "within60": r60, "n60": n60, "grade": grade,
-        "avg_days": rd(mean(filled_days), 0), "median_days": rd(median(filled_days), 0), "filled": len(filled_days),
+        "excluded": excluded, "avg_days": rd(mean(filled_days), 0), "median_days": rd(median(filled_days), 0), "filled": len(filled_days),
         "avg_yield": rd(mean(cash_yields), 2), "rows": list(reversed(rows)),
         "close": bars[-1]["close"], "price_from": dates[0],
     }
@@ -808,7 +822,7 @@ def dividend_fill(bars, dividends):
 # 8. 季節性
 # --------------------------------------------------------------------------
 
-def seasonality(bars, dividends=None, today=None):
+def seasonality(bars, dividends=None, today=None, trading_dates=None):
     rets = daily_returns(bars, dividends)
     if len(rets) < 200:
         return unavailable("股價資料不足一年，無法統計季節性。")
@@ -820,6 +834,11 @@ def seasonality(bars, dividends=None, today=None):
     today = today or TC.today()
     cur = today.isoformat()[:7]
     table, complete = {}, []
+    observed = {b["date"] for b in bars}
+    last_month = bars[-1]["date"][:7]
+    market_months = {}
+    for d in trading_dates or []:
+        market_months.setdefault(d[:7], set()).add(d)
     for k in keys:
         if k == first_month:
             continue                      # 第一個月不完整（缺月初），不統計
@@ -829,8 +848,21 @@ def seasonality(bars, dividends=None, today=None):
         if abs(g - 1) < 1e-9:
             g = 1.0                       # 換算單位時的浮點誤差：整個月平盤就是 0，不算漲也不算跌
         y, m = int(k[:4]), int(k[5:7])
-        partial = k >= cur
-        table.setdefault(y, {})[m] = {"ret": pc(g - 1, 1), "partial": partial}
+        reason = "本月尚未結束" if k >= cur else ""
+        if not reason:
+            if trading_dates is None:
+                if k >= last_month:
+                    reason = "尚無下一月份資料，無法確認月底完整性"
+            else:
+                expected = market_months.get(k, set())
+                if not market_months or k >= max(market_months):
+                    reason = "市場日曆尚未跨月，無法確認月底完整性"
+                earlier = [d for d in trading_dates if d < k + "-01"]
+                if (not expected or not expected.issubset(observed)
+                        or not earlier or max(earlier) not in observed):
+                    reason = "缺少交易日或上月底基準價"
+        partial = bool(reason)
+        table.setdefault(y, {})[m] = {"ret": pc(g - 1, 1), "partial": partial, "reason": reason}
         if not partial:
             complete.append((y, m, g - 1))
     stats = []
@@ -850,7 +882,7 @@ def seasonality(bars, dividends=None, today=None):
             return "尚無完整月份"
         return "%s %s%%、平均 %+.1f%%" % (prefix, "—" if s["win"] is None else "%.0f" % s["win"], s["avg"])
     text = "本月（%d 月）%s（%d 年）；下個月（%d 月）%s" % (
-        this_m, say(this_m, "歷史勝率"), years, next_m, say(next_m, "勝率"))
+        this_m, say(this_m, "歷史勝率"), stats[this_m - 1]["n"], next_m, say(next_m, "勝率"))
     if years < 5:
         text += "。樣本只有 %d 年，僅供參考" % years
     tone = "up" if ok(stats[this_m - 1]["avg"]) and stats[this_m - 1]["avg"] > 0 else \
@@ -1007,8 +1039,10 @@ class Live:
         key = TC.key_for("finmind-v2", ep["finmind"], dataset, data_id)
 
         def fetch(first, last):
-            j = T.http_get_json(ep["finmind"], {"dataset": dataset, "data_id": data_id, "start_date": first,
-                                                "end_date": last}, headers=headers)
+            params = {"dataset": dataset, "start_date": first, "end_date": last}
+            if data_id:
+                params["data_id"] = data_id
+            j = T.http_get_json(ep["finmind"], params, headers=headers)
             if not j or j.get("status") not in (200, "200"):
                 return None
             return j.get("data") if isinstance(j.get("data"), list) else None
@@ -1036,6 +1070,25 @@ class Live:
                 self.sources.add("FinMind")
             return bars
         return self._once("bars", get)
+
+    def actions(self):
+        def get():
+            rows = []
+            for dataset, before, reference in (
+                    ("TaiwanStockSplitPrice", "before_price", "after_price"),
+                    ("TaiwanStockParValueChange", "before_close", "after_ref_close")):
+                for r in self._fm(dataset, _years_ago(self.end, T.HISTORY_YEARS), data_id="", max_age=86400) or []:
+                    if r.get("stock_id") == self.code:
+                        rows.append({"date": r.get("date"), "before": T.to_float(r.get(before)),
+                                     "reference": T.to_float(r.get(reference)), "source": dataset})
+            return rows
+        return self._once("actions", get)
+
+    def calendar(self):
+        def get():
+            rows = self._fm("TaiwanStockPrice", _years_ago(self.end, T.HISTORY_YEARS), data_id="TAIEX")
+            return sorted({r["date"] for r in rows or [] if r.get("stock_id") == "TAIEX" and ok(T.to_float(r.get("close")))}) or None
+        return self._once("calendar", get)
 
     def dividends(self):
         def get():
@@ -1344,7 +1397,15 @@ def build(code, part, token="", ep=None, demo=False, us_extra=(), refresh=False)
         raise ValueError("取不到 %s 的股價資料。請確認代號，或在進階設定填入 FinMind Token 後再試。" % code)
     need_div = part in ("risk", "us", "dividend", "season")
     raw_divs = src.dividends() if need_div else None
-    bars, divs, split_list = adjust_for_splits(raw_bars, raw_divs)
+    candidates = price_jumps(raw_bars, raw_divs)
+    actions = src.actions() if candidates and not demo else []
+    bars, divs, split_list = adjust_for_splits(raw_bars, raw_divs, actions)
+    unresolved = price_jumps(bars, divs)
+    calendar_dates = ([b["date"] for b in bars] if demo else src.calendar()) if part in ("season", "dividend") else None
+    if part in ("season", "dividend") and not calendar_dates:
+        TC.warn("交易日曆取得失敗，無法確認歷史資料完整性。")
+    if unresolved:
+        TC.warn("異常跳價尚未取得可核對的分割／面額變更參考價：" + "、".join(unresolved))
     if part == "risk":
         issued = next((r["issued"] * 1000.0 for r in reversed(src.shareholding()) if ok(r.get("issued"))), None)
         data = risk(bars, divs, src.bench(), issued)
@@ -1363,12 +1424,20 @@ def build(code, part, token="", ep=None, demo=False, us_extra=(), refresh=False)
     elif part == "margins":
         data = margins(src.statements())
     elif part == "dividend":
-        data = dividend_fill(bars, divs) if divs is not None else unavailable("取不到除權息資料。")
+        data = dividend_fill(bars, divs, calendar_dates) if divs is not None else unavailable("取不到除權息資料。")
     elif part == "season":
-        data = seasonality(bars, divs)
+        data = seasonality(bars, divs, trading_dates=calendar_dates)
     else:
         h = src.holders()
         data = holders(h["weeks"], bars, h["source"])
+    if unresolved and part in ("risk", "us", "vp", "dividend", "season"):
+        data = unavailable("價格有未確認的公司行動或異常跳價，暫停跨期計算；請重抓資料後再試。")
+    if need_div and raw_divs is None:
+        data = unavailable("除權息資料未取得，無法確認調整後報酬或填息結果。")
+    if part in ("season", "dividend") and not calendar_dates:
+        data = unavailable("交易日曆未取得，暫不提供需要完整歷史的統計。")
+    if data.get("excluded"):
+        TC.warn("已排除 %d 次歷史不足或交易日缺漏的除權息事件。" % len(data["excluded"]))
     sources = sorted(src.sources) or ["FinMind"]
     data.update({"part": part, "part_name": PART_NAMES[part], "code": code, "name": info.get("name") or code,
                  "market": info.get("market"), "last_date": bars[-1]["date"], "close": bars[-1]["close"],

@@ -19,10 +19,12 @@ import twserve as S
 
 class CacheTests(unittest.TestCase):
     def setUp(self):
+        self.addCleanup(C.close_cache)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         for name,value in [("CACHE_DIR",Path(self.temp.name)),("today",lambda:dt.date(2026,9,19))]:
             p=patch.object(C,name,value);p.start();self.addCleanup(p.stop)
+        self.addCleanup(C.close_cache)
 
     def fetch(self,start,end):
         return [{"date":d,"value":int(d[-2:])} for d in C.dates(start,end)]

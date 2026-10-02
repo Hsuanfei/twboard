@@ -31,8 +31,8 @@ function overlap(a,b){ return a.x<b.x+b.width && b.x<a.x+a.width && a.y<b.y+b.he
     const context=await browser.newContext({viewport:{width:1600,height:1000},acceptDownloads:true});
     const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));
     await page.goto(base);
-    assert((await page.locator('h1').innerText()).includes('0930b'));
-    assert((await page.title()).includes('0930b'));
+    assert((await page.locator('h1').innerText()).includes('1002a'));
+    assert((await page.title()).includes('1002a'));
 
     /* ---- 位置：頁首右上角，不壓到標題或表單 ---- */
     for(const width of [1920,1600,1200,900]){

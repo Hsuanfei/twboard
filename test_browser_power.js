@@ -2,7 +2,7 @@
  * Copyright (C) 2026 黃炫斐 (Mick Huang)
  * 本檔案是「台股戰略產生器」的一部分：自由軟體，依 GNU GPL 第 3 版釋出，不附任何擔保，詳見 LICENSE。
  * 匯出的報告另有額外許可，見 LICENSE-EXCEPTION.md。 */
-/* 0930b 強力分析：九個分頁都畫得出來（示範資料）、分頁切換只抓一次、重抓、自訂美股、K線／返回、名詞解釋、手機版、離線報告不顯示。 */
+/* 1002a 強力分析：九個分頁都畫得出來（示範資料）、分頁切換只抓一次、重抓、自訂美股、K線／返回、名詞解釋、手機版、離線報告不顯示。 */
 const { chromium, python, launchOptions } = require('./test_support');
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -35,7 +35,7 @@ const TABS = ['holders','risk','us','vp','foreign','short','margins','dividend',
     page.on('pageerror',e=>errors.push(e.message));
     page.on('request',r=>{ if(r.url().includes('/api/power')) calls.push(new URL(r.url()).searchParams); });
     await page.goto('http://127.0.0.1:'+port);
-    assert.equal(await page.locator('h1').innerText(),'台股戰略產生器0930b版');
+    assert.equal(await page.locator('h1').innerText(),'台股戰略產生器1002a版');
     // 還沒分析時，從精簡頁首打開：提示輸入代號
     await page.evaluate(()=>TWPower.open(''));
     await page.locator('dialog#power').waitFor({state:'visible'});

@@ -66,7 +66,7 @@ class DataFixTests(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory()
         self.old=C.CACHE_DIR;C.CACHE_DIR=Path(self.tmp.name)
     def tearDown(self):
-        C.CACHE_DIR=self.old;self.tmp.cleanup()
+        C.close_cache();C.CACHE_DIR=self.old;self.tmp.cleanup()
     def test_event_range_extension_both_ends_and_reuse(self):
         events=[{'date':'2026-01-10','stock_or_cache_dividend':'除息'}, {'date':'2026-02-07','stock_or_cache_dividend':'除息'}]
         calls=[]

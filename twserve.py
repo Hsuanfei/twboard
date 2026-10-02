@@ -240,14 +240,16 @@ def get_power(q):
     now = time.time()
     with _lock:
         hit = _power_cache.get(key)
-    if hit and not refresh and now - hit["ts"] < hit["ttl"]:
-        return hit["data"]
+    if hit and not refresh and hit.get("day") == T.TC.today().isoformat() and 0 <= now - hit["ts"] < hit["ttl"]:
+        # 前端只能沿用剩餘壽命，不能在每次讀取時把舊結果再延長十分鐘。
+        return dict(hit["data"], cache_ttl_seconds=max(1, int(hit["ttl"] - (now - hit["ts"]))))
     with T.TC.operation():
         data = P.build(code, part, token, dict(ep, _yahoo=yahoo), demo=DEMO_MODE, us_extra=extra, refresh=refresh)
         data["warnings"] = T.TC.public_info()["warnings"]
         data["network_requests"] = T.TC.public_info()["network_requests"]
+        data["cache_ttl_seconds"] = WARN_TTL if data["warnings"] or not data.get("available", True) else POWER_TTL
     with _lock:
-        _power_cache[key] = {"data": data, "ts": now, "ttl": WARN_TTL if data["warnings"] else POWER_TTL}
+        _power_cache[key] = {"data": data, "ts": time.time(), "day": T.TC.today().isoformat(), "ttl": data["cache_ttl_seconds"]}
         while len(_power_cache) > 96:
             _power_cache.popitem(last=False)
     return data

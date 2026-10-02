@@ -40,7 +40,7 @@ server.serve_forever()
     await page.goto('http://127.0.0.1:'+port);
     await page.locator('#f-code').fill('2360');await page.locator('#f-days').fill('100');await page.locator('#btn-go').click();
     await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('完成 1 / 1'));
-    assert((await page.locator('h1').innerText()).includes('0930b'));
+    assert((await page.locator('h1').innerText()).includes('1002a'));
     assert.equal(await page.locator('.card:visible').count(),18);
     assert(await page.locator('.compare-scroll').isHidden());
     await page.locator('#compare-toggle').click();assert(await page.locator('.compare-scroll').isVisible());
@@ -64,7 +64,7 @@ server.serve_forever()
     await d.saveAs(path.join(output,'report.html'));
     const offline=await context.newPage();offline.on('pageerror',e=>errors.push(e.message));await offline.route(/^https?:/,r=>r.abort());
     await offline.goto('file:///'+path.join(output,'report.html').replace(/\\/g,'/'));
-    assert((await offline.title()).includes('0930b'));assert(await offline.locator('#dl-csv').isHidden());
+    assert((await offline.title()).includes('1002a'));assert(await offline.locator('#dl-csv').isHidden());
     await offline.locator('.analysis-tabs [data-view=raw]').click();assert(await offline.locator('#rawtab').isVisible());
     wait=offline.waitForEvent('download');await offline.locator('#btn-main-png').click();d=await wait;
     assert.equal(await offline.locator('.card:visible').count(),18);assert.equal(await d.failure(),null);

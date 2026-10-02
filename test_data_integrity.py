@@ -25,6 +25,7 @@ class DataIntegrityTests(unittest.TestCase):
         cache_patch = patch.object(T.TC,"CACHE_DIR",Path(temp.name))
         cache_patch.start()
         self.addCleanup(cache_patch.stop)
+        self.addCleanup(T.TC.close_cache)
         self.raw = T.fetch_demo("DEMO", days=80, seed=7)
         self.dates = [b["date"] for b in self.raw["bars"]]
         self.raw["chips"] = {d: {"foreign": 100., "trust": -20., "dealer": 10.} for d in self.dates}

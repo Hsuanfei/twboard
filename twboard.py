@@ -64,7 +64,7 @@ import zlib
 import twcache as TC
 import twpattern as TP
 
-APP_VERSION = "0930b"
+APP_VERSION = "1002a"
 APP_TITLE = "台股戰略產生器%s版" % APP_VERSION
 APP_CREDIT = "Powered by 黃炫斐(Mick Huang)"
 APP_COPYRIGHT = "Copyright (C) 2026 黃炫斐 (Mick Huang)"
@@ -1443,7 +1443,7 @@ def assemble(shell, echarts_tag, payload=None, extra=None):
     html = html.replace("<!--__ECHARTS__-->", echarts_tag)
     if "/*__MARKETJS__*/" in html:                      # 市場掃描只在互動版；匯出報告不需要
         html = html.replace("/*__MARKETJS__*/", _part("market.js"))
-    if "/*__POWERJS__*/" in html:                       # 0930b 強力分析：同樣只在互動版
+    if "/*__POWERJS__*/" in html:                       # 1002a 強力分析：同樣只在互動版
         html = html.replace("/*__POWERJS__*/", _part("power.js"))
     if payload is not None:
         html = html.replace("/*__PAYLOAD__*/null",

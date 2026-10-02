@@ -3,7 +3,7 @@
  * 本檔案是「台股戰略產生器」的一部分：自由軟體，依 GNU GPL 第 3 版釋出，不附任何擔保，詳見 LICENSE。
  * 匯出的報告另有額外許可，見 LICENSE-EXCEPTION.md。 */
 /* ========================================================================
-   強力分析（0930b）：一檔股票的九個深入面向，每個分頁各自向 /api/power 取資料。
+   強力分析（1002a）：一檔股票的九個深入面向，每個分頁各自向 /api/power 取資料。
    只在互動版載入；資料取不到時照實顯示原因，不用推估值。
    ======================================================================== */
 (function(){
@@ -17,6 +17,9 @@ var TABS=[
   ['vp','📊','分價量','volume-profile'],['foreign','🌏','外資持股','pw-foreign'],['short','🩳','借券／當沖','pw-sbl'],
   ['margins','🏭','三率＋現金流','pw-margins'],['dividend','💰','填息','pw-fill'],['season','📅','季節性','pw-season']
 ];
+var cacheMeta={}, requestController=null, settingsRevision=0;
+var CACHE_MS=600000;
+function taipeiDay(){ return new Date(Date.now()+8*3600000).toISOString().slice(0,10); }
 var st={code:'',name:'',tab:'risk',cache:{},charts:[],req:0,vp:'120',usPick:null,us:''};
 try{
   var saved=JSON.parse(localStorage.getItem('twboard.power')||'{}');
@@ -339,7 +342,8 @@ function rDividend(d){
       '<td>'+(r.filled?'填息 '+esc(r.fill_date):'未填息（'+r.elapsed+' 天）')+'</td></tr>';
   }).join('');
   h+='<div class="pw-box"><h4>歷次除權息紀錄</h4><div class="pw-scroll"><table class="pw-table"><thead><tr><th>除權息日</th><th>類別</th><th>權息值（元）</th><th>殖利率</th><th>除權息前價</th><th>填息天數</th><th>狀態</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
-    '<p class="pw-note">填息＝除權息後收盤價回到除權息前一日收盤價；天數以交易日計，0 天＝除權息當天填息。比例的分母只算已經過那麼多天（或已填息）的次數。股價資料從 '+esc(d.price_from)+' 起。</p></div>';
+    '<p class="pw-note">填息＝除權息後收盤價回到除權息前一日收盤價；天數以交易日計，0 天＝除權息當天填息。比例的分母只算觀察期已滿的次數，近期已填息也不提前納入。股價資料從 '+esc(d.price_from)+' 起。</p></div>';
+  if((d.excluded||[]).length) h+='<p class="pw-warn">已排除：'+d.excluded.map(function(x){return esc(x.date)+'（'+esc(x.reason)+'）';}).join('、')+'</p>';
   return {html:h};
 }
 
@@ -356,12 +360,12 @@ function rSeason(d){
   var cell=function(m){
     if(!m) return '<td></td>';
     var v=m.ret, a=Math.min(1,Math.abs(v||0)/20), bg=v>0?'rgba(229,72,77,'+(0.15+a*0.6)+')':v<0?'rgba(23,164,75,'+(0.15+a*0.6)+')':'transparent';
-    return '<td class="'+(m.partial?'pw-partial':'')+'" style="background:'+bg+'" title="'+(m.partial?'本月尚未結束，不列入統計':'')+'">'+nf(v,1)+(m.partial?'*':'')+'</td>';
+    return '<td class="'+(m.partial?'pw-partial':'')+'" style="background:'+bg+'" title="'+(m.partial?esc(m.reason||'資料不完整，不列入統計'):'')+'">'+nf(v,1)+(m.partial?'*':'')+'</td>';
   };
   h+='<div class="pw-box"><h4>逐年逐月漲跌（%）</h4><div class="pw-scroll"><table class="pw-table pw-heat"><thead><tr><th>年</th>'+
     [1,2,3,4,5,6,7,8,9,10,11,12].map(function(m){return '<th>'+m+'月</th>';}).join('')+'</tr></thead><tbody>'+
     d.table.map(function(y){ return '<tr><td>'+y.year+'</td>'+y.months.map(cell).join('')+'</tr>'; }).join('')+'</tbody></table></div>'+
-    '<p class="pw-note">月報酬以日報酬連乘，除權息日改用參考價（排除除息造成的下跌）。* 為本月尚未結束，不列入統計；樣本少於 5 年時參考價值有限。</p></div>';
+    '<p class="pw-note">月報酬以日報酬連乘，除權息日改用參考價（排除除息造成的下跌）。* 為尚未結束或資料不完整的月份，不列入統計；樣本少於 5 年時參考價值有限。</p></div>';
   return {html:h,after:function(){
     var M=d.months, k=scale(), ax=axisBase();
     makeChart('pw-c1',{animation:false,grid:{left:50,right:16,top:16,bottom:54},tooltip:Object.assign(tip(),{trigger:'axis',
@@ -376,7 +380,10 @@ function rSeason(d){
 var RENDER={holders:rHolders,risk:rRisk,us:rUS,vp:rVP,foreign:rForeign,short:rShort,margins:rMargins,dividend:rDividend,season:rSeason};
 
 /* ---------- 讀取與畫面 ---------- */
-function key(){ return st.code+'|'+st.tab+(st.tab==='us'?'|'+st.us:''); }
+function key(){ return st.code+'|'+st.tab+'|'+st.us+'|'+(($('a-fm')||{}).value||'')+'|'+!!(($('a-yahoo')||{}).checked)+'|'+settingsRevision; }
+function fresh(k){ var m=cacheMeta[k]; return !!(st.cache[k]&&m&&m.day===taipeiDay()&&Date.now()-m.time>=0&&Date.now()-m.time<m.ttl); }
+function invalidate(){ ++st.req; if(requestController) requestController.abort(); requestController=null; }
+
 function drawTabs(){
   $('pw-tabs').innerHTML=TABS.map(function(t){
     var icon=t[0]==='us'?'<i class="pw-us">US</i>':'<i class="pw-ic" aria-hidden="true">'+t[1]+'</i>';
@@ -396,8 +403,8 @@ function render(d){
     out=d.available===false&&tab!=='us'&&tab!=='short'?{html:empty(d.reason)}:RENDER[tab](d);
   }catch(err){ out={html:empty('畫面產生時發生問題：'+err.message)}; }
   var warn=(d.warnings||[]).length?'<p class="pw-warn">⚠ '+d.warnings.map(esc).join('；')+'</p>':'';
-  if((d.splits||[]).length) warn+='<p class="pw-note">偵測到'+d.splits.map(function(x){
-      return esc(x.date)+(x.ratio>1?' 股票分割（約 1 拆 '+nf(x.ratio,2)+'）':' 減資或股票合併（股價約 ×'+nf(1/x.ratio,2)+'）'); }).join('、')+
+  if((d.splits||[]).length) warn+='<p class="pw-note">已依來源參考價確認'+d.splits.map(function(x){
+      return esc(x.date)+(x.ratio>1?' 分割／面額變更（參考價比約 1： '+nf(x.ratio,2)+'）':' 股票合併（參考價約 ×'+nf(1/x.ratio,2)+'）'); }).join('、')+
     '：之前的股價與成交量已換算成現在的單位，圖表與報酬不會出現假的斷崖；填息表的權息值與除權息前價仍是當時的原始數字。</p>';
   var foot='<p class="pw-foot">資料：'+esc(d.source)+' · 股價最新 '+esc(d.last_date)+' · 產生 '+esc(d.generated)+
     (d.demo?' · <b>示範資料（非真實行情）</b>':'')+' · 規則計算與歷史統計，不是投資建議</p>';
@@ -415,21 +422,29 @@ function params(refresh){
   return p;
 }
 async function load(refresh){
+  invalidate();
+  var id=st.req;
+  busy(false);
   if(!st.code){ dispose(); $('pw-body').innerHTML=empty('請在右上角輸入股票代號，按「分析」。'); return; }
   var k=key();
-  if(!refresh&&st.cache[k]) return render(st.cache[k]);
-  var id=++st.req, name=TABS.filter(function(t){return t[0]===st.tab;})[0][2];
+  if(!refresh&&fresh(k)) return render(st.cache[k]);
+  var name=TABS.filter(function(t){return t[0]===st.tab;})[0][2];
+  var controller=new AbortController(); requestController=controller;
   dispose(); busy(true);
   $('pw-body').innerHTML='<div class="pw-loading"><span class="sp"></span>正在讀取 '+esc(st.code)+' 的「'+esc(name)+'」資料…第一次開啟需要下載，約需幾秒到十幾秒；之後會沿用本機快取。</div>';
   try{
-    var r=await fetch('/api/power?'+params(refresh)); var j=await r.json();
+    var r=await fetch('/api/power?'+params(refresh),{signal:controller.signal}); var j=await r.json();
     if(!r.ok||!j.ok) throw new Error(j.error||'讀取失敗');
+    if(id!==st.req||controller.signal.aborted||!dlg.open||k!==key()) return;
     st.cache[k]=j.data;
-    if(id===st.req) render(j.data);
+    cacheMeta[k]={time:Date.now(),day:taipeiDay(),ttl:Math.min(CACHE_MS,(j.data.cache_ttl_seconds||120)*1000)};
+    var keys=Object.keys(st.cache);
+    while(keys.length>96){var oldest=keys.shift();delete st.cache[oldest];delete cacheMeta[oldest];}
+    render(j.data);
   }catch(err){
-    if(id===st.req){ dispose(); $('pw-body').innerHTML=empty(err.message,'<div style="margin-top:12px"><button type="button" class="btn" id="pw-retry">再試一次</button></div>');
+    if(err.name!=='AbortError'&&id===st.req&&dlg.open){ dispose(); $('pw-body').innerHTML=empty(err.message,'<div style="margin-top:12px"><button type="button" class="btn" id="pw-retry">再試一次</button></div>');
       $('pw-retry').addEventListener('click',function(){ load(true); }); }
-  }finally{ if(id===st.req) busy(false); }
+  }finally{ if(id===st.req){requestController=null;busy(false);} }
 }
 function currentCode(){
   try{ var P=window.TWBoard&&TWBoard.payload&&TWBoard.payload(); return P&&P.code?P.code:''; }catch(e){ return ''; }
@@ -445,11 +460,12 @@ function open(code){
   if(!st.code) $('pw-code').focus();
 }
 function close(){
+  invalidate(); busy(false);
   dispose();
   if(dlg.open){ if(dlg.close) dlg.close(); else dlg.removeAttribute('open'); }
   document.documentElement.classList.remove('pw-lock');
 }
-dlg.addEventListener('close',function(){ dispose(); document.documentElement.classList.remove('pw-lock'); });
+dlg.addEventListener('close',function(){ invalidate(); busy(false); dispose(); document.documentElement.classList.remove('pw-lock'); });
 $('pw-tabs').addEventListener('click',function(e){
   var b=e.target.closest('[data-pw-tab]'); if(!b||b.dataset.pwTab===st.tab) return;
   st.tab=b.dataset.pwTab; remember(); drawTabs(); load(false);
@@ -468,7 +484,7 @@ $('pw-form').addEventListener('submit',function(e){
   load(false);
 });
 $('pw-refresh').addEventListener('click',function(){
-  Object.keys(st.cache).forEach(function(k){ if(k.indexOf(st.code+'|')===0) delete st.cache[k]; });   // 其他分頁下次開啟也重新確認
+  Object.keys(st.cache).forEach(function(k){ if(k.indexOf(st.code+'|')===0) {delete st.cache[k];delete cacheMeta[k];} });   // 其他分頁下次開啟也重新確認
   load(true);
 });
 $('pw-body').addEventListener('click',function(e){
@@ -490,4 +506,11 @@ document.addEventListener('click',function(e){
 });
 
 window.TWPower={open:open,close:close,state:function(){return st;}};
+
+function refreshIfExpired(){ if(dlg.open&&!document.hidden&&!requestController&&st.code&&!fresh(key())) load(false); }
+setInterval(refreshIfExpired,60000);
+document.addEventListener('visibilitychange',refreshIfExpired);
+window.addEventListener('focus',refreshIfExpired);
+window.addEventListener('twboard-settings-changed',function(){settingsRevision++;st.cache={};cacheMeta={};invalidate();busy(false);if(dlg.open)load(false);});
+['a-fm','a-yahoo'].forEach(function(id){var el=$(id);if(el)el.addEventListener('change',function(){window.dispatchEvent(new Event('twboard-settings-changed'));});});
 })();
