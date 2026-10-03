@@ -120,67 +120,67 @@ class ParallelFetchTests(unittest.TestCase):
 
 
 class SettledRuleTests(unittest.TestCase):
-    def _last_weekday(self):
-        d = C.today()
-        while d.weekday() >= 5:
-            d -= dt.timedelta(days=1)
-        return d
+    """1003a：近 7 日的資料在「下一次公布時間」以前都有效（時間固定為 2026-10-07 星期三，結果不受執行時刻影響）。"""
+    TW = dt.timezone(dt.timedelta(hours=8))
 
-    def test_recent_days_not_reconfirmed_once_latest_weekday_has_data(self):
+    def setUp(self):
         fresh_cache()
-        end = self._last_weekday(); start = end - dt.timedelta(days=20)
+        self.now = dt.datetime(2026, 10, 7, 15, 0, tzinfo=self.TW).timestamp()
+        for name, value in (("clock", lambda: self.now),
+                            ("today", lambda: dt.datetime.fromtimestamp(self.now, self.TW).date())):
+            p = patch.object(C, name, value); p.start(); self.addCleanup(p.stop)
+
+    def at(self, hh, mm=0, day=7):
+        self.now = dt.datetime(2026, 10, day, hh, mm, tzinfo=self.TW).timestamp()
+
+    def test_recent_days_not_reconfirmed_until_next_release(self):
         calls = []
         def fetch(a, b):
             calls.append((a, b)); return _rows("TaiwanStockPrice", "2330", a, b)
         key = C.key_for("perf-settled")
         with C.operation():
-            C.range_data(key, start.isoformat(), end.isoformat(), fetch)
+            C.range_data(key, "2026-09-15", "2026-10-07", fetch)
         self.assertEqual(len(calls), 1)
-        # 讓所有資料「過了 TTL」但仍在一天內：最近平日已有資料 → 不必再確認
-        with C._io_lock, C.database() as con:
-            con.execute("UPDATE cache SET fetched=fetched-?", (C.TTL + 60,))
+        self.at(17, 40)
         with C.operation():
-            rows = C.range_data(key, start.isoformat(), end.isoformat(), fetch)
-        self.assertEqual(len(calls), 1, "近 7 日已到手，不該再打 API")
+            rows = C.range_data(key, "2026-09-15", "2026-10-07", fetch)
+        self.assertEqual(len(calls), 1, "17:45 公布以前不該再打 API")
         self.assertTrue(rows)
-        # 超過一天就要重新確認一次
-        with C._io_lock, C.database() as con:
-            con.execute("UPDATE cache SET fetched=fetched-90000")
+        self.at(17, 50)
         with C.operation():
-            C.range_data(key, start.isoformat(), end.isoformat(), fetch)
+            C.range_data(key, "2026-09-15", "2026-10-07", fetch)
         self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[-1][0], "2026-09-30", "只重新確認近 7 日")
 
-    def test_blank_latest_day_is_reconfirmed_until_late_evening(self):
-        fresh_cache()
-        end = self._last_weekday(); start = end - dt.timedelta(days=10)
+    def test_blank_latest_day_is_reconfirmed_at_next_release(self):
         calls = []
         def fetch(a, b):
             calls.append((a, b))
-            return [r for r in _rows("TaiwanStockPrice", "2330", a, b) if r["date"] != end.isoformat()]   # 最近平日還沒出資料
+            return [r for r in _rows("TaiwanStockPrice", "2330", a, b) if r["date"] != "2026-10-07"]   # 今天還沒出資料
         key = C.key_for("perf-blank")
         with C.operation():
-            C.range_data(key, start.isoformat(), end.isoformat(), fetch)
-        with C._io_lock, C.database() as con:
-            con.execute("UPDATE cache SET fetched=fetched-?", (C.TTL + 60,))
-        now = time.time()
-        stamp = dt.datetime.fromtimestamp(now - C.TTL - 60, dt.timezone(dt.timedelta(hours=8)))
+            C.range_data(key, "2026-09-25", "2026-10-07", fetch)
+        self.at(16, 30)
         with C.operation():
-            C.range_data(key, start.isoformat(), end.isoformat(), fetch)
-        if stamp.date() == end and stamp.hour < 22:
-            self.assertEqual(len(calls), 2, "當天 22:00 前空白的近日要照 TTL 再確認")
-        else:
-            self.assertEqual(len(calls), 1, "隔天（或當天深夜）確認過是空的就不必再查")
+            C.range_data(key, "2026-09-25", "2026-10-07", fetch)
+        self.assertEqual(len(calls), 1, "下一次公布（17:45）以前不重查")
+        self.at(22, 0)
+        with C.operation():
+            C.range_data(key, "2026-09-25", "2026-10-07", fetch)
+        self.assertEqual(len(calls), 2)
+        self.at(7, 0, day=8)
+        with C.operation():
+            C.range_data(key, "2026-09-25", "2026-10-07", fetch)
+        self.assertEqual(len(calls), 2, "晚上確認過，隔天 08:00 前不再查")
 
     def test_refresh_recent_bypasses_settled(self):
-        fresh_cache()
-        end = self._last_weekday(); start = end - dt.timedelta(days=10)
         calls = []
         def fetch(a, b):
             calls.append((a, b)); return _rows("TaiwanStockPrice", "2330", a, b)
         key = C.key_for("perf-refresh")
         with C.operation():
-            C.range_data(key, start.isoformat(), end.isoformat(), fetch)
-            C.range_data(key, start.isoformat(), end.isoformat(), fetch, refresh_recent=True)
+            C.range_data(key, "2026-09-25", "2026-10-07", fetch)
+            C.range_data(key, "2026-09-25", "2026-10-07", fetch, refresh_recent=True)
         self.assertEqual(len(calls), 2)
 
 

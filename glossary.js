@@ -22,7 +22,7 @@ var PLACES = {
   head:'頁首行情列', dmi:'ADX／DMI 趨勢強度圖', cmp:'自選股比較表', filter:'比較表篩選',
   bt:'規則分回測', sim:'交易模擬', macro:'全球市場與匯率', raw:'原始資料表',
   scan:'市場掃描・選股清單', rank:'市場掃描・漲幅排行', etf:'市場掃描・熱門 ETF', sector:'市場掃描・族群輪動',
-  alert:'市場掃描・到價警示', paper:'市場掃描・模擬持倉', toolbar:'分析工作台工具列', power:'強力分析'
+  alert:'市場掃描・到價警示', paper:'市場掃描・模擬持倉', toolbar:'分析工作台工具列', power:'強力分析', usage:'右下角「資料來源」小視窗'
 };
 /* 速查表：每一格對到最主要的一個名詞 */
 /* 速查表：[圖卡, 主要名詞, 小字要列出的名詞（省略時只列主要名詞）] */
@@ -38,7 +38,8 @@ var INDEX = [
   ['scan','screen-rules',['screen-rules','scan-score','mk-tags','inst-streak']],['rank','rank-list',['rank-list','liquidity']],
   ['etf','etf-rank'],['sector','sector-rotation',['sector-rotation','quadrant-change','sector-heat','sector-rank','sector-timeline','sector-accel','themes']],
   ['alert','price-alert'],['paper','paper-trade'],
-  ['power','pw-risk',['pw-holders','pw-risk','pw-sharpe','pw-downside','pw-us','pw-foreign','pw-sbl','pw-daytrade','pw-margins','pw-cash','pw-fill','pw-season']]
+  ['power','pw-risk',['pw-holders','pw-risk','pw-sharpe','pw-downside','pw-us','pw-foreign','pw-sbl','pw-daytrade','pw-margins','pw-cash','pw-fill','pw-season']],
+  ['usage','api-usage',['api-usage','cache-rules']]
 ];
 var CATS = [
   ['start','先讀這裡'], ['quote','行情與頁首'], ['trend','均線與趨勢'], ['momentum','動能指標'],
@@ -645,6 +646,19 @@ var ENTRIES = [
  where:[15,16,'head'],
  what:'法人或融資券的最新日期比股價最新日期舊。',
  read:'通常是當天的法人或融資券資料還沒公布（多在傍晚至晚間），過一段時間重新查詢即可補上。'},
+{id:'api-usage', cat:'data', term:'FinMind 用量與資料來源狀態', en:'API usage meter',
+ where:['usage'],
+ what:'畫面右下角的小按鈕：FinMind 這一小時用了幾次、還剩多少，以及 FinMind、證交所、櫃買中心、集保結算所、Stooq、Yahoo 財經各自連線是否正常、現在在等誰回應。點一下展開詳細內容。',
+ calc:['有填 FinMind Token：顯示 FinMind 官方的用量數字（最多每分鐘更新一次，查詢用量本身不算額度）。','沒有 Token：用本程式近 60 分鐘實際送出的查詢次數估算；匿名額度 300 次／小時，同一個網路的其他程式也會算進去，所以實際剩下的可能更少。','狀態：正常／讀取中／回應緩慢（等超過 8 秒）／額度用完（FinMind 回覆 HTTP 402）／被拒絕（HTTP 403）／連線失敗（顯示原因）／未使用。'],
+ read:['小按鈕變紅：看是哪個來源、什麼原因；額度用完時先等額度恢復，或到「進階」填入免費的 FinMind Token（600 次／小時）。','讀取很久沒動靜：展開後的「正在等待回應」會列出正在等哪個來源、查什麼、等了幾秒。','「連線檢查」會逐一連線各資料來源，找出是網路、憑證還是網站的問題。'],
+ note:'只記錄時間、來源與結果，不記錄 Token 或完整網址；用量紀錄存在本機資料庫，重開程式也記得這一小時用了幾次。'},
+{id:'cache-rules', cat:'data', term:'本機資料庫（多久重新確認一次）', en:'local cache',
+ where:['usage','head'],
+ what:'抓過的資料存在程式資料夾的 .twboard-cache（硬碟上的 SQLite 資料庫）。重開網頁、重開程式、換股再回來，都直接用這裡的資料，只補還沒抓過的日子。',
+ calc:['台股日線、三大法人、融資券、外資持股、借券、當沖：收盤後 14:30、17:45、21:45 與隔天 08:00 各確認一次近 7 日；同一個時段內再分析不連網。收盤前不查當天（還不可能有資料）。','除權息、股票分割：每天 18:00 後確認一次。','財報（損益表、現金流量表）：最新一季到手後，到下一季法定公布期限前都不再查；還沒公布時，只在公布期間每週一確認一次。','美股：台灣時間隔天清晨 06:00、09:00 與 18:00 各確認一次。','近 7 日以前的資料抓過就不再查。'],
+ read:'小視窗的「本機資料庫」會顯示近 60 分鐘有多少次直接用本機資料、省下多少查詢。想立刻拿最新資料，按強力分析的「↻ 重抓」。',
+ note:'「清除本機資料庫」之後要重新下載（會用到 FinMind 額度）；一般不需要清除，程式每天會自動清掉 10 年以前用不到的資料。'},
+
 {id:'fetch-mode', cat:'data', term:'資料取得方式', en:'fetch mode',
  where:['head','cmp'],
  calc:['使用快取：全部來自本機快取，這次沒有連網查詢','增量更新：只補抓缺少或需要再確認的日期','更新有缺漏：部分資料集這次沒抓到，沿用先前資料或留空，稍後會自動重試','示範資料：合成資料，不是真實行情'],

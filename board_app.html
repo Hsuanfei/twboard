@@ -405,6 +405,60 @@ dialog.power::backdrop{background:rgba(0,0,0,.72)}
   .pw-2col,.pw-panels{grid-template-columns:minmax(0,1fr)}.pw-chart{height:300px}.pw-chart.tall{height:340px}
 }
 @media print{dialog.power{display:none!important}}
+
+/* ---------- 1003a：角落的「資料來源與用量」小視窗（互動版專用） ---------- */
+.usage{position:fixed;right:14px;bottom:14px;z-index:45;font-size:calc(12.5px * var(--font-scale,1));max-width:calc(100vw - 28px)}
+.us-pill{display:flex;align-items:center;gap:8px;margin-left:auto;background:rgba(21,26,36,.96);border:1px solid #33405e;color:var(--ink-2);border-radius:999px;padding:7px 14px;font:inherit;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.45);max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.us-pill:hover{color:#fff;border-color:#4f74c9}
+.us-pill b{color:#fff;font-variant-numeric:tabular-nums}
+.us-dot{flex:none;width:10px;height:10px;border-radius:50%;background:#5d6780;font-style:normal}
+.us-dot.ok{background:#2fbf71}.us-dot.busy{background:#3987e5;animation:uspulse 1s ease-in-out infinite}.us-dot.slow,.us-dot.warn{background:#fab219}
+.us-dot.limit,.us-dot.error,.us-dot.blocked{background:#e5484d}.us-dot.idle{background:#5d6780}
+@keyframes uspulse{50%{opacity:.35}}
+.us-panel{position:absolute;right:0;bottom:calc(100% + 8px);width:min(440px,calc(100vw - 28px));max-height:min(76vh,700px);overflow:auto;background:#151a24;border:1px solid #3b4d75;border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.6);padding:12px 16px 14px;color:var(--ink)}
+.us-panel[hidden]{display:none}
+.us-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.us-head b{font-size:calc(14px * var(--font-scale,1));color:#f2c94c}
+.us-head span{color:var(--muted);font-size:calc(11px * var(--font-scale,1));margin-right:auto}
+.us-head button{background:none;border:1px solid #33405e;color:var(--ink-2);border-radius:7px;width:28px;height:26px;cursor:pointer;font:inherit}
+.us-head button:hover{color:#fff;border-color:#4f74c9}
+.us-panel h4{margin:12px 0 6px;font-size:calc(12px * var(--font-scale,1));color:#9ec5f4;border-bottom:1px solid #273048;padding-bottom:5px}
+.us-fm .us-big{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.us-fm .us-big b{font-size:calc(22px * var(--font-scale,1));font-variant-numeric:tabular-nums}
+.us-fm .us-big span{color:var(--muted)}
+.us-fm .us-big em{margin-left:auto;font-style:normal;font-weight:700}
+.us-bar{height:8px;border-radius:5px;background:#232a3a;overflow:hidden;margin:6px 0 4px}
+.us-bar i{display:block;height:100%;border-radius:5px;background:#2fbf71}
+.us-bar i.warn{background:#fab219}.us-bar i.crit{background:#e5484d}
+.us-note{color:var(--muted);font-size:calc(11.5px * var(--font-scale,1));line-height:1.55;margin:3px 0}
+.us-alert{margin:8px 0 2px;padding:8px 10px;border-radius:8px;font-size:calc(12px * var(--font-scale,1));line-height:1.55}
+.us-alert.crit{background:rgba(229,72,77,.12);border:1px solid rgba(229,72,77,.5);color:#ffb3b5}
+.us-alert.warn{background:rgba(250,178,25,.1);border:1px solid rgba(250,178,25,.45);color:#f6d38a}
+.us-alert.tip{background:rgba(57,135,229,.1);border:1px solid rgba(57,135,229,.4);color:#bcd6f7}
+.us-src{list-style:none;margin:0;padding:0}
+.us-src li{display:grid;grid-template-columns:12px 92px 1fr;gap:2px 8px;align-items:baseline;padding:6px 0;border-bottom:1px solid #1f2638}
+.us-src li:last-child{border-bottom:0}
+.us-src .us-dot{align-self:center}
+.us-src .us-name{font-weight:700;color:#fff}
+.us-src .us-st{color:var(--ink-2)}
+.us-src .us-st b.ok{color:#5fd896}.us-src .us-st b.busy{color:#7fb3ef}.us-src .us-st b.slow,.us-src .us-st b.warn{color:#f6c453}
+.us-src .us-st b.limit,.us-src .us-st b.error,.us-src .us-st b.blocked{color:#ff8a8d}.us-src .us-st b.idle{color:var(--muted)}
+.us-src small{grid-column:2/-1;color:var(--muted);font-size:calc(11px * var(--font-scale,1));line-height:1.5}
+.us-now{margin:4px 0 0;padding:0;list-style:none}
+.us-now li{display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-variant-numeric:tabular-nums}
+.us-now li.slow{color:#f6c453}
+.us-cache b{color:#fff;font-variant-numeric:tabular-nums}
+.us-rules{margin:6px 0 0;color:var(--muted);font-size:calc(11px * var(--font-scale,1))}
+.us-rules summary{cursor:pointer;color:var(--ink-2)}
+.us-rules ul{margin:4px 0 0;padding-left:18px;line-height:1.6}
+.us-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;align-items:center}
+.us-actions .btn.danger{border-color:rgba(229,72,77,.6);color:#ffb3b5}
+.us-actions span{color:var(--muted);font-size:calc(11px * var(--font-scale,1))}
+.pw-usage{margin:3px 0 0 14px;color:var(--muted);font-size:calc(11.5px * var(--font-scale,1))}
+.pw-usage .us-dot{display:inline-block;vertical-align:-1px;margin-right:6px}
+body.live-app{padding-bottom:56px}
+@media(max-width:700px){.usage{right:10px;bottom:10px;left:10px}.us-pill{padding:7px 12px}.us-panel{width:auto;left:0;right:0;max-height:72vh}.us-src li{grid-template-columns:12px 78px 1fr}}
+@media print{.usage,.pw-usage{display:none!important}}
 </style>
 <!--__ECHARTS__-->
 </head>
@@ -710,6 +764,7 @@ dialog.power::backdrop{background:rgba(0,0,0,.72)}
       <div>
         <h2 id="pw-title">強力分析</h2>
         <p class="pw-sub" id="pw-sub">輸入股票代號後按「分析」：大戶持股／風險指標／美股連動等九個面向，只用實際抓到的資料</p>
+        <p class="pw-usage" id="pw-usage" title="FinMind 用量與資料來源狀態（每幾秒更新）"></p>
       </div>
       <form class="pw-form" id="pw-form" autocomplete="off">
         <input id="pw-code" maxlength="10" placeholder="股票代號" aria-label="強力分析的股票代號">
@@ -727,6 +782,28 @@ dialog.power::backdrop{background:rgba(0,0,0,.72)}
 <!--__BODY__-->
   </div>
 <!--__LEGAL__-->
+
+  <aside class="usage" id="usage" aria-label="資料來源與 API 用量">
+    <section class="us-panel" id="us-panel" hidden aria-labelledby="us-title">
+      <div class="us-head"><b id="us-title">資料來源與用量</b><span id="us-updated"></span>
+        <button type="button" id="us-refresh" title="立刻更新" aria-label="立刻更新">↻</button>
+        <button type="button" id="us-close" title="收起" aria-label="收起">×</button></div>
+      <div class="us-fm" id="us-fm"></div>
+      <h4>連線狀態</h4>
+      <ul class="us-src" id="us-src"></ul>
+      <div id="us-now-box" hidden><h4>正在等待回應</h4><ul class="us-now" id="us-now"></ul></div>
+      <h4>本機資料庫</h4>
+      <div class="us-cache" id="us-cache"></div>
+      <div class="us-actions">
+        <button type="button" class="btn" id="us-diagnose" title="逐一連線各資料來源，找出抓不到資料的原因">連線檢查</button>
+        <button type="button" class="btn danger" id="us-clear">清除本機資料庫…</button>
+        <span id="us-msg" role="status" aria-live="polite"></span>
+      </div>
+    </section>
+    <button type="button" class="us-pill" id="us-pill" aria-expanded="false" aria-controls="us-panel" title="FinMind 用量與各資料來源的連線狀態">
+      <i class="us-dot" id="us-dot"></i><span id="us-pill-text">資料來源</span>
+    </button>
+  </aside>
 </div>
 
 <script>
@@ -737,6 +814,9 @@ dialog.power::backdrop{background:rgba(0,0,0,.72)}
 </script>
 <script>
 /*__POWERJS__*/
+</script>
+<script>
+/*__USAGEJS__*/
 </script>
 <script>
 (function(){
@@ -1033,7 +1113,7 @@ $('filter-export').addEventListener('click',function(){
       comparisonNotes(d).join(' · ')||'資料齊全',d.source,d.dmi?d.dmi.adx:null,d.dmi?d.dmi.plus_di:null,d.dmi?d.dmi.minus_di:null,d.volume_analysis?d.volume_analysis.state:'',d.score_model,condition,exported]);
   });
   var url=URL.createObjectURL(new Blob(['\uFEFF'+rows.map(function(row){return row.map(comparisonCsvCell).join(',');}).join('\r\n')+'\r\n'],{type:'text/csv;charset=utf-8'}));
-  var a=document.createElement('a');a.href=url;a.download='自選股篩選_1002a_'+exported.slice(0,10)+'.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url);},1000);
+  var a=document.createElement('a');a.href=url;a.download='自選股篩選_1003a_'+exported.slice(0,10)+'.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url);},1000);
   $('preset-msg').textContent='已匯出 '+codes.length+' 檔，依目前表格排序；未完成或失敗的股票不列入。';
 });
 function drawComparison(){

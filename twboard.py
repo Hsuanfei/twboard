@@ -63,8 +63,9 @@ import zlib
 
 import twcache as TC
 import twpattern as TP
+import twusage as TU
 
-APP_VERSION = "1002a"
+APP_VERSION = "1003a"
 APP_TITLE = "台股戰略產生器%s版" % APP_VERSION
 APP_CREDIT = "Powered by 黃炫斐(Mick Huang)"
 APP_COPYRIGHT = "Copyright (C) 2026 黃炫斐 (Mick Huang)"
@@ -111,6 +112,8 @@ def describe_error(e):
         return "連線逾時"
     if isinstance(r, ConnectionRefusedError):
         return "連線被拒絕（可能被防火牆或防毒軟體擋下）"
+    if type(r).__name__ == "IncompleteRead":
+        return "下載到一半被中斷（網站回應不完整，稍後會重試）"
     if isinstance(r, (ConnectionResetError, ConnectionAbortedError)):
         return "連線被中斷（可能被防火牆、防毒軟體或網站擋下）"
     text = str(r)
@@ -139,10 +142,12 @@ def http_get_json(url, params=None, retries=2, pause=0.6, timeout=20, headers=No
     # 以主機為單位：FinMind 連不上不代表證交所也連不上，自動切換來源仍要能運作。
     if st is not None and host in st.get("offline_hosts", ()):
         return None
+    base, query = url, params
     if params:
         url = url + ("&" if "?" in url else "?") + urllib.parse.urlencode(params)
     last = None
     for i in range(retries):
+        rid = TU.begin(base, query)          # 1003a：記錄每一次真正送出的請求（來源、查什麼、花多久、結果）
         try:
             req = urllib.request.Request(url, headers={
                 "User-Agent": UA,
@@ -152,9 +157,24 @@ def http_get_json(url, params=None, retries=2, pause=0.6, timeout=20, headers=No
             })
             with _NET_SLOTS, urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX) as r:
                 raw = r.read().decode("utf-8", errors="replace")
-            return raw if raw_text else json.loads(raw)
+            if raw_text:
+                TU.end(rid, True, 200)
+                return raw
+            try:
+                j = json.loads(raw)
+            except ValueError:
+                TU.end(rid, False, 200, "回應不是 JSON（可能是網站維護中）")
+                raise
+            if isinstance(j, dict) and j.get("status") in (402, "402"):
+                # FinMind 額度用完時有時用 JSON 的 status 告知
+                TU.end(rid, False, 402, "查詢次數已達上限")
+                TC.warn("資料來源回應查詢次數已達上限（HTTP 402）。請稍後再試，或在進階設定填入 FinMind Token。")
+                return j
+            TU.end(rid, True, 200)
+            return j
         except urllib.error.HTTPError as e:
             last = e
+            TU.end(rid, False, e.code, "查詢次數已達上限" if e.code in (402, 429) else describe_error(e))
             if 400 <= e.code < 500:
                 if e.code in (402, 429):
                     TC.warn("資料來源回應查詢次數已達上限（HTTP %d）。請稍後再試，或在進階設定填入 FinMind Token。" % e.code)
@@ -164,6 +184,7 @@ def http_get_json(url, params=None, retries=2, pause=0.6, timeout=20, headers=No
             time.sleep(pause * (i + 1))
         except urllib.error.URLError as e:
             last = e
+            TU.end(rid, False, None, describe_error(e))
             if st is not None:
                 st.setdefault("offline_hosts", []).append(host)
                 st.setdefault("errors", {})[host] = describe_error(e)
@@ -172,6 +193,7 @@ def http_get_json(url, params=None, retries=2, pause=0.6, timeout=20, headers=No
             break
         except Exception as e:          # noqa: BLE001
             last = e
+            TU.end(rid, False, None, describe_error(e))      # 已經記過的（例如 JSON 格式錯誤）不會重複計算
             time.sleep(pause * (i + 1))
     reason = describe_error(last) if last is not None else "未知原因"
     if st is not None:
@@ -523,6 +545,10 @@ def endpoints(override=None):
             if not v.lower().startswith(("http://", "https://")):
                 raise ValueError("API 網址必須以 http:// 或 https:// 開頭：%s" % k)
             ep[k] = v
+    # 自訂網址（例如 FinMind 的鏡像）在「資料來源」小視窗裡仍歸到原來的來源。
+    for k, label in (("finmind", TU.FINMIND), ("twse_day", "證交所"), ("twse_t86", "證交所"),
+                     ("twse_margin", "證交所"), ("stooq", "Stooq"), ("yahoo", "Yahoo 財經")):
+        TU.register(ep[k], label)
     return ep
 
 
@@ -544,8 +570,9 @@ def fm(dataset, data_id, start, end, token, ep=None, required_dates=None):
     if dataset == "TaiwanStockDividendResult":
         # 舊月鍵沒有涵蓋起迄資訊，不沿用；逐日記錄已確認空值，擴大範圍只補缺日。
         key = TC.key_for("finmind-dividend-v3", ep["finmind"], dataset, data_id)
-        return TC.range_data(key, start, end, fetch, max_age=86400, require_complete=True, recent_ttl=86400)
-    return TC.range_data(key, start, end, fetch, required_dates=required_dates)
+        # 除權息結果一天確認一次（FinMind 偶爾會補登過去的事件，所以整段每天確認一次，仍只花一次查詢）。
+        return TC.range_data(key, start, end, fetch, max_age=86400, require_complete=True, schedule="tw_once")
+    return TC.range_data(key, start, end, fetch, required_dates=required_dates, schedule="tw")
 
 
 
@@ -722,12 +749,13 @@ def _compact_margin(j):
 
 
 def twse_json(url, params, final_day, compact=None):
-    age = None if final_day < TC.today()-_dt.timedelta(days=TC.RECENT_DAYS) else TC.TTL
+    # 1003a：近 7 日的證交所資料在「下一次公布時間」前都有效，不再每 15 分鐘重查。
+    sched = None if final_day < TC.today()-_dt.timedelta(days=TC.RECENT_DAYS) else "tw_official"
     valid = lambda j: isinstance(j,dict) and j.get("stat")=="OK"
     if compact is None:
-        return TC.response(TC.key_for("twse-v1",url,params), lambda: http_get_json(url,params), valid, age)
-    return TC.response(TC.key_for("twse-v2",url,params), lambda: http_get_json(url,params), valid, age,
-                       transform=compact, kind="market-day", legacy_key=TC.key_for("twse-v1",url,params))
+        return TC.response(TC.key_for("twse-v1",url,params), lambda: http_get_json(url,params), valid, None, schedule=sched)
+    return TC.response(TC.key_for("twse-v2",url,params), lambda: http_get_json(url,params), valid, None,
+                       transform=compact, kind="market-day", legacy_key=TC.key_for("twse-v1",url,params), schedule=sched)
 
 
 def fetch_twse(code, start, end, throttle=0.35, chip_days=60, ep=None):
@@ -1445,6 +1473,8 @@ def assemble(shell, echarts_tag, payload=None, extra=None):
         html = html.replace("/*__MARKETJS__*/", _part("market.js"))
     if "/*__POWERJS__*/" in html:                       # 1002a 強力分析：同樣只在互動版
         html = html.replace("/*__POWERJS__*/", _part("power.js"))
+    if "/*__USAGEJS__*/" in html:                       # 1003a 資料來源與用量小視窗：只在互動版
+        html = html.replace("/*__USAGEJS__*/", _part("usage.js"))
     if payload is not None:
         html = html.replace("/*__PAYLOAD__*/null",
                             json.dumps(payload, ensure_ascii=False, allow_nan=False).replace("<", "\\u003c"))

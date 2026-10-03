@@ -1032,7 +1032,7 @@ class Live:
             self._memo[name] = fn()
         return self._memo[name]
 
-    def _fm(self, dataset, start, end=None, data_id=None, max_age=None):
+    def _fm(self, dataset, start, end=None, data_id=None, max_age=None, schedule="tw"):
         """FinMind 逐日快取；鍵與主畫面相同（同一份股價、融資券資料可以共用）。"""
         ep, headers = self.ep, ({"Authorization": "Bearer " + self.token} if self.token else {})
         data_id = self.code if data_id is None else data_id
@@ -1047,7 +1047,7 @@ class Live:
                 return None
             return j.get("data") if isinstance(j.get("data"), list) else None
         return TC.range_data(key, start, end or self.end.isoformat(), fetch, max_age=max_age,
-                             refresh_recent=self.refresh)
+                             refresh_recent=self.refresh, schedule=schedule)
 
     # ---- 共用 ----
     def info(self):
@@ -1077,7 +1077,7 @@ class Live:
             for dataset, before, reference in (
                     ("TaiwanStockSplitPrice", "before_price", "after_price"),
                     ("TaiwanStockParValueChange", "before_close", "after_ref_close")):
-                for r in self._fm(dataset, _years_ago(self.end, T.HISTORY_YEARS), data_id="", max_age=86400) or []:
+                for r in self._fm(dataset, _years_ago(self.end, T.HISTORY_YEARS), data_id="", schedule="tw_once") or []:
                     if r.get("stock_id") == self.code:
                         rows.append({"date": r.get("date"), "before": T.to_float(r.get(before)),
                                      "reference": T.to_float(r.get(reference)), "source": dataset})
@@ -1161,8 +1161,9 @@ class Live:
             start = _years_ago(self.end, 4.2)
             TC.report("財報", "綜合損益表與現金流量表")
             got = TC.parallel([
-                ("綜合損益表", lambda: self._fm("TaiwanStockFinancialStatements", start, max_age=3 * 86400)),
-                ("現金流量表", lambda: self._fm("TaiwanStockCashFlowsStatement", start, max_age=3 * 86400))])
+                # 1003a：財報一季有效（到手後下一季公布期才再查），不再每 3 天整段重抓。
+                ("綜合損益表", lambda: self._fm("TaiwanStockFinancialStatements", start, schedule="quarterly")),
+                ("現金流量表", lambda: self._fm("TaiwanStockCashFlowsStatement", start, schedule="quarterly"))])
             return statements_by_quarter(got[0], got[1])
         return self._once("statements", get)
 
@@ -1171,7 +1172,8 @@ class Live:
             s, e = _years_ago(self.end, 1.3), self.end.isoformat()
             ep = dict(self.ep, _force_recent=self.refresh)
             rows = M._fm_rows("USStockPrice", ticker, s, e, self.token, ep,
-                              lambda r: T.to_float(r.get("Close")) if r.get("stock_id") in (ticker, None) else None)
+                              lambda r: T.to_float(r.get("Close")) if r.get("stock_id") in (ticker, None) else None,
+                              schedule="us")
             label = "FinMind"
             def stale(rs):
                 return not rs or (self.end - _dt.date.fromisoformat(max(r["date"] for r in rs))).days > 7
@@ -1198,7 +1200,7 @@ class Live:
             if self.token and not denied:
                 TC.report("大戶持股", "FinMind 股東持股分級（贊助會員）")
                 before = list((TC.state() or {}).get("warnings", []))
-                rows = self._fm("TaiwanStockHoldingSharesPer", _years_ago(self.end, 1.2))
+                rows = self._fm("TaiwanStockHoldingSharesPer", _years_ago(self.end, 1.2), schedule="weekly")
                 if rows:
                     per = {}
                     for r in rows:

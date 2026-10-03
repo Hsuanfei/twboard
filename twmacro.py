@@ -29,12 +29,12 @@ import twboard as T
 import twcache as TC
 
 SERIES = [
-    {"id": "USDTWD", "name": "美元兌台幣", "kind": "fx", "unit": "元", "digits": 3,
+    {"id": "USDTWD", "name": "美元兌台幣", "kind": "fx", "unit": "元", "digits": 3, "schedule": "fx",
      "note": "台灣銀行牌告即期中價；假日與未報價日不列入"},
-    {"id": "TAIEX", "name": "台股加權指數", "kind": "index", "region": "台股", "digits": 0},
-    {"id": "^GSPC", "name": "S&P 500", "kind": "index", "region": "美股", "digits": 0, "stooq": "^spx", "yahoo": "^GSPC"},
-    {"id": "^IXIC", "name": "那斯達克", "kind": "index", "region": "美股", "digits": 0, "stooq": "^ndq", "yahoo": "^IXIC"},
-    {"id": "^N225", "name": "日經 225", "kind": "index", "region": "日股", "digits": 0, "stooq": "^nkx", "yahoo": "^N225"},
+    {"id": "TAIEX", "name": "台股加權指數", "kind": "index", "region": "台股", "digits": 0, "schedule": "tw"},
+    {"id": "^GSPC", "name": "S&P 500", "kind": "index", "region": "美股", "digits": 0, "stooq": "^spx", "yahoo": "^GSPC", "schedule": "us"},
+    {"id": "^IXIC", "name": "那斯達克", "kind": "index", "region": "美股", "digits": 0, "stooq": "^ndq", "yahoo": "^IXIC", "schedule": "us"},
+    {"id": "^N225", "name": "日經 225", "kind": "index", "region": "日股", "digits": 0, "stooq": "^nkx", "yahoo": "^N225", "schedule": "jp"},
 ]
 
 
@@ -45,7 +45,7 @@ def valid_day(value, start, end):
         return False
 
 
-def _fm_rows(dataset, data_id, start, end, token, ep, value_of):
+def _fm_rows(dataset, data_id, start, end, token, ep, value_of, schedule="tw"):
     """透過 FinMind 逐日快取取得 [{"date","value"}]；value_of 從原始列取數值，None 代表該日無值。"""
     headers = {"Authorization": "Bearer " + token} if token else {}
     key = TC.key_for("macro-v2-spot-only", ep["finmind"], dataset, data_id)
@@ -62,10 +62,10 @@ def _fm_rows(dataset, data_id, start, end, token, ep, value_of):
                 if v is not None and math.isfinite(v) and v > 0:
                     out.append({"date": r["date"], "value": v})
         return out
-    return TC.range_data(key, start, end, fetch, refresh_recent=ep.get("_force_recent", False))
+    return TC.range_data(key, start, end, fetch, refresh_recent=ep.get("_force_recent", False), schedule=schedule)
 
 
-def _stooq_rows(symbol, start, end, ep):
+def _stooq_rows(symbol, start, end, ep, schedule="us"):
     """Stooq 每日 CSV：Date,Open,High,Low,Close,Volume。回 [{"date","value"}] 或 None。"""
     key = TC.key_for("macro-stooq-v2", ep["stooq"], symbol)
 
@@ -81,7 +81,7 @@ def _stooq_rows(symbol, start, end, ep):
             if v and math.isfinite(v) and v > 0 and valid_day(d, first, last):
                 out.append({"date": d, "value": v})
         return out
-    return TC.range_data(key, start, end, fetch, refresh_recent=ep.get("_force_recent", False))
+    return TC.range_data(key, start, end, fetch, refresh_recent=ep.get("_force_recent", False), schedule=schedule)
 
 
 YAHOO_LABEL = "Yahoo 財經（非官方）"
@@ -130,7 +130,7 @@ def parse_yahoo_chart(j, first, last, now=None):
     return out
 
 
-def _yahoo_rows(symbol, start, end, ep):
+def _yahoo_rows(symbol, start, end, ep, schedule="us"):
     key = TC.key_for("macro-yahoo-v1", ep["yahoo"], symbol)
 
     def fetch(first, last):
@@ -139,7 +139,7 @@ def _yahoo_rows(symbol, start, end, ep):
         j = T.http_get_json(ep["yahoo"].rstrip("/") + "/" + urllib.parse.quote(symbol),
                             {"period1": p1, "period2": p2, "interval": "1d", "includePrePost": "false"})
         return parse_yahoo_chart(j, first, last)
-    return TC.range_data(key, start, end, fetch, refresh_recent=ep.get("_force_recent", False))
+    return TC.range_data(key, start, end, fetch, refresh_recent=ep.get("_force_recent", False), schedule=schedule)
 
 
 def _fx_mid(r):
@@ -167,19 +167,20 @@ def fetch_series(spec, start, end, token, ep):
     """回傳 (rows, source_label)。rows 依日期排序、去重；取不到回 ([], None)。"""
     rows, label = None, None
     if spec["id"] == "USDTWD":
-        rows = _fm_rows("TaiwanExchangeRate", "USD", start, end, token, ep, lambda r: _fx_mid(r) if r.get("currency") in (None,"USD") else None); label = "FinMind（台銀牌告）"
+        rows = _fm_rows("TaiwanExchangeRate", "USD", start, end, token, ep, lambda r: _fx_mid(r) if r.get("currency") in (None,"USD") else None, schedule="fx"); label = "FinMind（台銀牌告）"
     elif spec["id"] == "TAIEX":
         rows = _fm_rows("TaiwanStockPrice", "TAIEX", start, end, token, ep,
                         lambda r: T.to_float(r.get("close")) if r.get("stock_id") == "TAIEX" else None); label = "FinMind"
     else:
         initial = _warnings()
         rows = _fm_rows("USStockPrice", spec["id"], start, end, token, ep,
-                        lambda r: T.to_float(r.get("Close")) if r.get("stock_id") in (spec["id"], None) else None)
+                        lambda r: T.to_float(r.get("Close")) if r.get("stock_id") in (spec["id"], None) else None,
+                        schedule=spec.get("schedule", "us"))
         label = "FinMind"
         if spec.get("stooq") and (not rows or (_dt.date.fromisoformat(end)-_dt.date.fromisoformat(max(r["date"] for r in rows))).days > 7):
             TC.report(spec["name"], "FinMind 無資料或日期較舊，檢查 Stooq")
             before = _warnings()
-            fallback = _stooq_rows(spec["stooq"], start, end, ep)
+            fallback = _stooq_rows(spec["stooq"], start, end, ep, schedule=spec.get("schedule", "us"))
             if fallback and (not rows or max(r["date"] for r in fallback) > max(r["date"] for r in rows)):
                 rows, label = fallback, "Stooq"
                 _forget_warnings(spec["name"] + "：", initial, before)
@@ -187,7 +188,7 @@ def fetch_series(spec, start, end, token, ep):
                 not rows or (_dt.date.fromisoformat(end)-_dt.date.fromisoformat(max(r["date"] for r in rows))).days > 7):
             TC.report(spec["name"], "FinMind／Stooq 無資料或日期較舊，檢查 Yahoo 財經")
             before = _warnings()
-            fallback = _yahoo_rows(spec["yahoo"], start, end, ep)
+            fallback = _yahoo_rows(spec["yahoo"], start, end, ep, schedule=spec.get("schedule", "us"))
             if fallback and (not rows or max(r["date"] for r in fallback) > max(r["date"] for r in rows)):
                 rows, label = fallback, YAHOO_LABEL
                 _forget_warnings(spec["name"] + "：", initial, before)

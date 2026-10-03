@@ -407,12 +407,15 @@ def diagnose(token="", yahoo=False):
         if token and "finmind" in url:
             headers["Authorization"] = "Bearer " + token
         t0 = time.monotonic()
+        rid = None
         try:
             _wait(url)
             req = T.urllib.request.Request(url + "?" + urllib.parse.urlencode(params), headers=headers)
+            rid = T.TU.begin(url, params)          # 連線檢查也更新角落「資料來源」的狀態
             with T.urllib.request.urlopen(req, timeout=12, context=T._SSL_CTX) as r:
                 body = r.read().decode("utf-8", errors="replace")
                 item["http"] = r.status
+            T.TU.end(rid, True, r.status)
             item["bytes"] = len(body)
             try:
                 j = json.loads(body)
@@ -438,8 +441,12 @@ def diagnose(token="", yahoo=False):
                         item.update(ok=False, result="格式無法辨識：%s" % e, head=re.sub(r"\s+", " ", body[:160]))
         except T.urllib.error.HTTPError as e:
             item.update(ok=False, http=e.code, result=T.describe_error(e))
+            if rid:
+                T.TU.end(rid, False, e.code, "查詢次數已達上限" if e.code in (402, 429) else T.describe_error(e))
         except Exception as e:                                        # noqa: BLE001
             item.update(ok=False, result=T.describe_error(e))
+            if rid:
+                T.TU.end(rid, False, None, T.describe_error(e))
         item["ms"] = int((time.monotonic() - t0) * 1000)
         out.append(item)
     proxies = sorted(k for k in T.urllib.request.getproxies() if k in ("http", "https"))     # 只列有沒有設定，不列位址
@@ -453,15 +460,16 @@ def _roc(day):
 
 
 def _day_record(key, day, fetch, allow_network):
-    """一天一筆：{"closed": true} 或 {"rows": {...}}。過去日子存了就不再抓；今天的資料 15 分鐘後可再確認。"""
+    """一天一筆：{"closed": true} 或 {"rows": {...}}。過去日子存了就不再抓；今天的資料在下一次公布時間前都有效（1003a）。"""
     cached = TC.read(key).get("")
-    fresh_for = None if day < TC.today() else TC.TTL
-    if cached and (fresh_for is None or time.time() - cached[1] < fresh_for):
+    if cached and (day < TC.today() or TC.clock() < TC.TW_OFFICIAL.next_release(cached[1])):
         TC.count("cache_hits")
+        TC._note_activity("cache")
         return cached[0]
     if not allow_network:
         return cached[0] if cached else None
     TC.count("network_requests")
+    TC._note_activity("network")
     rec = fetch()
     if rec is None:
         if cached:

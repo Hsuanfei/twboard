@@ -50,6 +50,7 @@ import twmacro as M
 import twcompare as C
 import twmarket as MK
 import twpower as P
+import twusage as U
 import twxlsx
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -113,6 +114,7 @@ def get_payload(q, progress=None, token_override=None):
         if hit and hit["days"] >= days and now-hit["ts"] < hit.get("ttl", CACHE_TTL):
             raw = hit["raw"]
             T.TC.count("cache_hits")
+            T.TC._note_activity("cache")
             for warning in hit.get("warnings",[]):
                 T.TC.warn(warning)
             mode = "memory"
@@ -203,6 +205,7 @@ def get_macro(q):
         key = key + (hashlib.sha256(token.encode()).hexdigest(),)
         hit = _macro_cache.get(key)
     if hit and now - hit["ts"] < hit.get("ttl", MACRO_TTL) and q.get("refresh", ["0"])[0] != "1":
+        T.TC._note_activity("cache")
         return hit["data"]
     ep = dict(ep, _force_recent=q.get("refresh", ["0"])[0] == "1", _yahoo=yahoo)
     with T.TC.operation():
@@ -242,6 +245,7 @@ def get_power(q):
         hit = _power_cache.get(key)
     if hit and not refresh and hit.get("day") == T.TC.today().isoformat() and 0 <= now - hit["ts"] < hit["ttl"]:
         # 前端只能沿用剩餘壽命，不能在每次讀取時把舊結果再延長十分鐘。
+        T.TC._note_activity("cache")
         return dict(hit["data"], cache_ttl_seconds=max(1, int(hit["ttl"] - (now - hit["ts"]))))
     with T.TC.operation():
         data = P.build(code, part, token, dict(ep, _yahoo=yahoo), demo=DEMO_MODE, us_extra=extra, refresh=refresh)
@@ -253,6 +257,27 @@ def get_power(q):
         while len(_power_cache) > 96:
             _power_cache.popitem(last=False)
     return data
+
+
+def usage_view(q):
+    """角落「資料來源」小視窗：FinMind 用量、各來源連線狀態、本機資料庫。只讀本機紀錄，不會花 FinMind 額度。"""
+    with _lock:
+        token = DEFAULT_TOKEN if SESSION_TOKEN is None else SESSION_TOKEN
+        running = sum(j["status"] in ("queued", "running") for j in _jobs.values())
+    data = U.snapshot("" if DEMO_MODE else token, fetch_official=not DEMO_MODE)
+    data.update(demo=DEMO_MODE, jobs=running)
+    return data
+
+
+def clear_cache():
+    """「清除本機資料庫」：有分析或掃描正在進行時不清，避免寫到一半。"""
+    with _lock:
+        if any(j["status"] in ("queued", "running") for j in _jobs.values()):
+            raise ValueError("還有分析或市場掃描正在進行，請等完成後再清除。")
+    removed = T.TC.clear_all()
+    with _lock:
+        _cache.clear(); _power_cache.clear(); _macro_cache.clear()
+    return {"removed": removed, "cache": T.TC.stats_detail(max_age=0)}
 
 
 def latest_macro():
@@ -654,7 +679,7 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "twboard/" + T.APP_VERSION
 
     def log_message(self, fmt, *a):
-        if self.path.startswith("/api/") and not self.path.startswith("/api/jobs/"):
+        if self.path.startswith("/api/") and not self.path.startswith(("/api/jobs/", "/api/usage")):     # 輪詢的請求不洗版
             sys.stderr.write("  %s %s\n" % (self.command, urllib.parse.urlsplit(self.path).path))
 
     # ---- 回應工具 ----
@@ -776,6 +801,10 @@ class Handler(BaseHTTPRequestHandler):
                 with _lock:
                     MK.paper_delete(str(obj.get("id", "")), str(obj.get("which", "open")))
                 return self._json({"ok": True, "portfolio": portfolio()})
+            if path == "/api/cache/clear":
+                if obj.get("confirm") != "yes":
+                    raise ValueError("請再確認一次")
+                return self._json({"ok": True, "data": clear_cache()})
             if path == "/api/analyse":
                 q = {k: [str(v)] for k, v in obj.items() if k != "token"}
                 return self._json({"ok": True, "data": save_snapshot(get_payload(q))})
@@ -783,7 +812,7 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, UnicodeError) as e:
             # 不回傳輸入內容，避免憑證出現在錯誤訊息。群組相關訊息是固定字串，不含輸入，可原樣顯示。
             if path.startswith(("/api/watchlists", "/api/filter-presets", "/api/themes", "/api/alerts",
-                                "/api/portfolio", "/api/market")) and isinstance(e, ValueError):
+                                "/api/portfolio", "/api/market", "/api/cache")) and isinstance(e, ValueError):
                 return self._json({"ok": False, "error": str(e)}, 400)
             return self._json({"ok": False, "error": "請求或資料無效，請確認股票代號與設定。"}, 400)
         except Exception:
@@ -859,6 +888,8 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/health":
                 return self._json({"ok": True, "version": self.server_version})
+            if path == "/api/usage":
+                return self._json({"ok": True, "data": usage_view(q)})
 
             if path.startswith("/api/jobs/"):
                 return self._json({"ok":True,"job":job_status(path.rsplit("/",1)[-1])})
@@ -928,8 +959,8 @@ def main():
     globals()["DEMO_MODE"] = a.demo
 
     for f in ("twboard.py", "board_app.html", "board.css", "board_body.html", "board.js", "board_template.html",
-              "twcache.py", "twmacro.py", "twmarket.py", "twpattern.py", "twpower.py", "twxlsx.py", "glossary.js", "market.js",
-              "power.js"):
+              "twcache.py", "twmacro.py", "twmarket.py", "twpattern.py", "twpower.py", "twusage.py", "twxlsx.py", "glossary.js",
+              "market.js", "power.js", "usage.js"):
         if not os.path.exists(os.path.join(HERE, f)):
             raise SystemExit("缺少檔案 %s，請確認所有檔案都放在同一個資料夾。" % f)
 
